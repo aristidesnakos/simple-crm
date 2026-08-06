@@ -1,0 +1,164 @@
+"use client";
+
+import { useState } from "react";
+import { Account, Project, STATUS_COLOR } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Plus, Search } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+export function AccountList({
+  project,
+  accounts,
+  selectedAccountId,
+  onSelect,
+  onCreated,
+}: {
+  project: Project | null;
+  accounts: Account[];
+  selectedAccountId: string | null;
+  onSelect: (id: string) => void;
+  onCreated: (account: Account) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const filtered = accounts.filter((a) => {
+    const q = query.toLowerCase();
+    if (!q) return true;
+    return (
+      a.name.toLowerCase().includes(q) ||
+      (a.email ?? "").toLowerCase().includes(q) ||
+      (a.labels ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  async function createAccount() {
+    if (!project || !name.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, name, email }),
+      });
+      const account = await res.json();
+      onCreated(account);
+      setName("");
+      setEmail("");
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!project) {
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+        Select a project to see its accounts.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 border-b px-3 py-2.5">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search accounts"
+            className="h-8 pl-7 text-sm"
+          />
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New account in {project.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="aname">Name</Label>
+                <Input
+                  id="aname"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Jamie Lee"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="aemail">Email</Label>
+                <Input
+                  id="aemail"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="jamie@example.com"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={createAccount} disabled={saving || !name.trim()}>
+                Add account
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {filtered.length === 0 && (
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            No accounts match.
+          </p>
+        )}
+        {filtered.map((a) => (
+          <button
+            key={a.id}
+            onClick={() => onSelect(a.id)}
+            className={cn(
+              "block w-full border-b px-4 py-3 text-left transition-colors hover:bg-accent",
+              selectedAccountId === a.id && "bg-accent"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm font-medium">{a.name}</span>
+              <span
+                className={cn(
+                  "h-2 w-2 shrink-0 rounded-full",
+                  STATUS_COLOR[a.status] ?? "bg-slate-400"
+                )}
+                title={a.status}
+              />
+            </div>
+            <div className="truncate text-xs text-muted-foreground">
+              {a.email || "no email on file"}
+            </div>
+            {a.labels && (
+              <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                {a.labels}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}

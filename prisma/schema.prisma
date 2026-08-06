@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  status      String    @default("Active") // Active | Paused | Complete
+  approach    String? // Email template / approach notes
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  accounts    Account[]
+}
+
+model Account {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name          String
+  email         String?
+  status        String   @default("Prospect") // Prospect | Contacted | Engaged | Closed Won | Closed Lost | Rejected
+  labels        String? // comma-separated
+  lastContact   DateTime?
+  nextAction    String?
+  notes         String?
+  draftLink     String? // Gmail draft URL, set once a draft is created
+  notesLink     String? // external notes doc link
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
