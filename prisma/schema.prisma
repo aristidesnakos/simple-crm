@@ -33,4 +33,23 @@ model Account {
   notesLink     String? // external notes doc link
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  statusEvents  StatusEvent[]
+}
+
+// Append-only log of Account.status transitions. Account.status is overwritten in
+// place and updatedAt is clobbered by any unrelated edit, so without this table
+// "how many accounts moved to Engaged this month" is unanswerable for any period
+// that has already elapsed. See docs/ROADMAP.md §2.4.
+//
+// Stores the raw display string, not a slug: statuses are unvalidated free text,
+// so a later rename would orphan history keyed on anything else.
+model StatusEvent {
+  id         String   @id @default(cuid())
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  fromStatus String?
+  toStatus   String
+  changedAt  DateTime @default(now())
+
+  @@index([accountId, changedAt])
 }

@@ -21,6 +21,16 @@ export type Account = {
   notesLink: string | null;
 };
 
+// Append-only status history — see docs/ROADMAP.md §2.4.
+// Hand-mirrored from prisma/schema.prisma; dates are strings because they cross JSON.
+export type StatusEvent = {
+  id: string;
+  accountId: string;
+  fromStatus: string | null;
+  toStatus: string;
+  changedAt: string;
+};
+
 export const STATUS_OPTIONS = [
   "Prospect",
   "Contacted",

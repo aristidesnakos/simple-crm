@@ -20,12 +20,16 @@ export function AccountList({
   project,
   accounts,
   selectedAccountId,
+  error,
+  onRetry,
   onSelect,
   onCreated,
 }: {
   project: Project | null;
   accounts: Account[];
   selectedAccountId: string | null;
+  error: string | null;
+  onRetry: () => void;
   onSelect: (id: string) => void;
   onCreated: (account: Account) => void;
 }) {
@@ -44,6 +48,9 @@ export function AccountList({
       (a.labels ?? "").toLowerCase().includes(q)
     );
   });
+
+  // An errored load must not render rows at all — see docs/ROADMAP.md task 1.l.
+  const visible = error ? [] : filtered;
 
   async function createAccount() {
     if (!project || !name.trim()) return;
@@ -124,12 +131,22 @@ export function AccountList({
         </Dialog>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {filtered.length === 0 && (
+        {error && (
+          <div className="space-y-3 px-4 py-6 text-sm text-muted-foreground">
+            <p>{error}</p>
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              Try again
+            </Button>
+          </div>
+        )}
+        {!error && filtered.length === 0 && (
           <p className="px-4 py-6 text-sm text-muted-foreground">
-            No accounts match.
+            {accounts.length === 0
+              ? "No accounts in this project yet."
+              : "No accounts match."}
           </p>
         )}
-        {filtered.map((a) => (
+        {visible.map((a) => (
           <button
             key={a.id}
             onClick={() => onSelect(a.id)}

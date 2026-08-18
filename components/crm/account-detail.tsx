@@ -21,10 +21,12 @@ import { toast } from "sonner";
 export function AccountDetail({
   account,
   project,
+  projects,
   onUpdated,
 }: {
   account: Account | null;
   project: Project | null;
+  projects: Project[];
   onUpdated: (account: Account) => void;
 }) {
   const { data: session } = useSession();
@@ -39,12 +41,15 @@ export function AccountDetail({
     setComposeOpen(false);
   }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keyed on the project as well as the account: switching project without
+  // switching account used to leave the previous project's template in the
+  // composer. See docs/ROADMAP.md task 1.n.
   useEffect(() => {
     if (account) {
       setSubject(`Following up${project ? ` — ${project.name}` : ""}`);
       setBody(project?.approach ? `${project.approach}\n\n` : "");
     }
-  }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [account?.id, project?.id, project?.name, project?.approach]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!local) {
     return (
@@ -55,16 +60,24 @@ export function AccountDetail({
   }
 
   async function patch(fields: Partial<Account>) {
-    const next = { ...local!, ...fields } as Account;
-    setLocal(next);
-    const res = await fetch(`/api/accounts/${local!.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
-    });
-    if (res.ok) {
-      const updated = await res.json();
+    const before = local!;
+    setLocal({ ...before, ...fields } as Account);
+    try {
+      const res = await fetch(`/api/accounts/${before.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!res.ok) throw new Error(`Couldn't save that change (${res.status}).`);
+      const updated = (await res.json()) as Account;
       onUpdated(updated);
+    } catch (err: unknown) {
+      // Without this the optimistic value stayed on screen looking saved — including
+      // a project move that never actually happened. See docs/ROADMAP.md task 1.n.
+      setLocal(before);
+      toast.error(
+        err instanceof Error ? err.message : "Couldn't save that change."
+      );
     }
   }
 
@@ -109,12 +122,27 @@ export function AccountDetail({
             onChange={(e) => setLocal({ ...local, name: e.target.value })}
             onBlur={() => patch({ name: local.name })}
           />
-          <p className="text-sm text-muted-foreground">
-            {project?.name ?? "No project"}
-          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>Project</Label>
+            <Select
+              value={local.projectId}
+              onValueChange={(v) => patch({ projectId: v })}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="No project" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1.5">
             <Label>Status</Label>
             <Select
@@ -133,15 +161,16 @@ export function AccountDetail({
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1.5">
-            <Label>Email</Label>
-            <Input
-              value={local.email ?? ""}
-              onChange={(e) => setLocal({ ...local, email: e.target.value })}
-              onBlur={() => patch({ email: local.email })}
-              placeholder="name@example.com"
-            />
-          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Email</Label>
+          <Input
+            value={local.email ?? ""}
+            onChange={(e) => setLocal({ ...local, email: e.target.value })}
+            onBlur={() => patch({ email: local.email })}
+            placeholder="name@example.com"
+          />
         </div>
 
         <div className="space-y-1.5">

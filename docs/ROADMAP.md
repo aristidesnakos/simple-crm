@@ -5,7 +5,8 @@ and testable), **design**, **tasks**, **acceptance criteria**, and **out of scop
 Requirements are the contract; tasks are the means. If a task doesn't serve a numbered
 requirement, cut it.
 
-Status: Phase 0 not started. Last updated 2026-08-07 (revision 2 — see §1.3).
+Status: Phase 0 not started. Phase 1 tasks 1.f, 1.l, 1.m, 1.n done (2026-08-19).
+Last updated 2026-08-07 (revision 2 — see §1.3).
 
 ---
 
@@ -464,20 +465,21 @@ change, and after six months unused.
 - [ ] **1.c** Add `Message`, `StatusEvent`, and a `DIRECTION` constant to `lib/types.ts` (hand-mirrored; dates as `string | null`). `DIRECTION` follows the `STATUS_OPTIONS` precedent, not the schema-comment-only precedent `CLAUDE.md` flags as error-prone.
 - [ ] **1.d** Normalize `email` on write in `app/api/accounts/route.ts` and the PATCH handler (`?.trim().toLowerCase() || null`) — this also fixes the `""`-instead-of-NULL poisoning.
 - [ ] **1.e** Build `POST /api/sync/[accountId]` per the design above, including the `DRAFT`/`CHAT` filter and three-valued direction.
-- [ ] **1.f** Log status changes in `app/api/accounts/[id]/route.ts` — write a `StatusEvent` whenever `status` changes. **Do this first if anything slips**; it is the only unrecoverable item.
+- [x] **1.f** Log status changes in `app/api/accounts/[id]/route.ts` — write a `StatusEvent` whenever `status` changes. Shipped 2026-08-19: logged inside a transaction with the update.
 - [ ] **1.g** Build `GET /api/stats` implementing §2.2 exactly. Return counts alongside rates, and the contact ids behind each bucket — a bare percentage is unauditable, and one you can drill into is the difference between a number that gets trusted and one that gets ignored.
 - [ ] **1.h** Surface stats on their own route, not squeezed into a pane. This is the product's reason to exist; it does not belong in a header strip. *(Supersedes revision 1's Q3.)*
 - [ ] **1.i** Show "last synced" per contact, and a distinct never-synced state. An unsynced contact is not a contact with no replies.
 - [ ] **1.j** Add an inbound/outbound origin badge (derived from the earliest non-`system` message by `internalDate`).
 - [ ] **1.k** Link each contact's threads to Gmail via `https://mail.google.com/mail/u/<idx>/#all/<threadId>` rather than rendering conversations in-app (D11).
-- [ ] **1.l** **Bug:** add `.catch` + error state to both fetches in `components/crm/crm-app.tsx:26-34` and `:42-45`. `setLoading(false)` at `:32` is inside `.then`, so any rejection hangs "Loading…" forever — and this fires on the *normal* error path, since every CRUD route returns an HTML 500 that makes `r.json()` throw. The second fetch is worse than a hung spinner: line 38 clears `accounts` only when `selectedProjectId` is null, so a failed fetch leaves the **previous project's contacts rendered under the new project's header**. Satisfies 1.7.
-- [ ] **1.m** **Bug:** fix the stale-response race at `crm-app.tsx:36-45` — no `AbortController`, no cleanup, no generation guard, and `:44` writes unconditionally. If P1 resolves after P2, `accounts` holds P1's rows under P2's label, and any edit then PATCHes a P1 contact and `handleAccountUpdated` splices it in so it persists.
-- [ ] **1.n** **Bug + feature:** "move to project". Five parts, not one — revision 1's task covered about a third:
+- [x] **1.l** **Bug:** add `.catch` + error state to both fetches in `components/crm/crm-app.tsx:26-34` and `:42-45`. `setLoading(false)` at `:32` is inside `.then`, so any rejection hangs "Loading…" forever — and this fires on the *normal* error path, since every CRUD route returns an HTML 500 that makes `r.json()` throw. The second fetch is worse than a hung spinner: line 38 clears `accounts` only when `selectedProjectId` is null, so a failed fetch leaves the **previous project's contacts rendered under the new project's header**. Satisfies 1.7.
+- [x] **1.m** **Bug:** fix the stale-response race at `crm-app.tsx:36-45` — no `AbortController`, no cleanup, no generation guard, and `:44` writes unconditionally. If P1 resolves after P2, `accounts` holds P1's rows under P2's label, and any edit then PATCHes a P1 contact and `handleAccountUpdated` splices it in so it persists.
+- [x] **1.n** **Bug + feature:** "move to project". Five parts, not one — revision 1's task covered about a third:
   1. Add `projectId` to the PATCH whitelist at `app/api/accounts/[id]/route.ts:11-20`. Today a `PATCH {projectId}` returns **200 OK with the account unchanged**.
   2. Filter `accounts` by `projectId` in `handleAccountUpdated` — otherwise the moved contact stays visible under the old project until reload.
   3. Decrement/increment `_count` on both projects (creation already does this at `crm-app.tsx:61-67`; there is no path for a move, and `CLAUDE.md` warns the count is maintained in two independent places).
   4. `account-detail.tsx` reads `project?.name` from the *selected project* prop at `:113` and keys its compose effects on `account?.id` with exhaustive-deps disabled — after a move it names the old project and pre-fills the old project's `approach`.
   5. Add an error branch to `patch()` (`account-detail.tsx:65-68` is `if (res.ok)` with no `else`), so a failed move doesn't leave the optimistic value on screen.
+  6. A project picker in `account-detail.tsx` — without one, req 1.8 has no UI path.
   Satisfies 1.8.
 - [ ] **1.o** Surface `RefreshAccessTokenError` as a re-auth prompt rather than a 502, in the sync route and anywhere else reading the session.
 - [ ] **1.p** Guard `DELETE /api/projects/[id]` — refuse when messages exist, or soft-delete (§2.5).
