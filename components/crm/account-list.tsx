@@ -168,6 +168,14 @@ export function AccountList({
             <div className="truncate text-xs text-muted-foreground">
               {a.email || "no email on file"}
             </div>
+            {a.nextActionDue && (
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {/* Sliced, not formatted: the value is an ISO string crossing JSON,
+                    and toLocaleDateString would render differently on server and
+                    client. Same reason the queue does its own date arithmetic. */}
+                due {a.nextActionDue.slice(0, 10)}
+              </div>
+            )}
             {a.labels && (
               <div className="mt-1 truncate text-[11px] text-muted-foreground">
                 {a.labels}

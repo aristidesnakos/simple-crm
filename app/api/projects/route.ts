@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeEmail } from "@/lib/contacts";
 
 export async function GET() {
   const projects = await prisma.project.findMany({
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
       description: body.description ?? null,
       status: body.status ?? "Active",
       approach: body.approach ?? null,
+      fromEmail: normalizeEmail(body.fromEmail),
     },
   });
   return NextResponse.json(project, { status: 201 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeEmail } from "@/lib/contacts";
 
 export async function PATCH(
   request: NextRequest,
@@ -14,6 +15,9 @@ export async function PATCH(
       ...(body.description !== undefined && { description: body.description }),
       ...(body.status !== undefined && { status: body.status }),
       ...(body.approach !== undefined && { approach: body.approach }),
+      ...(body.fromEmail !== undefined && {
+        fromEmail: normalizeEmail(body.fromEmail),
+      }),
     },
   });
   return NextResponse.json(project);

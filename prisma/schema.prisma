@@ -13,6 +13,8 @@ model Project {
   description String?
   status      String    @default("Active") // Active | Paused | Complete
   approach    String? // Email template / approach notes
+  fromEmail   String? // Sending identity for this campaign, e.g. hello@mangood.app.
+  // Null falls back to the authenticated mailbox default. See docs/ROADMAP.md task 1.3.
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   accounts    Account[]
@@ -24,10 +26,18 @@ model Account {
   project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name          String
   email         String?
-  status        String   @default("Prospect") // Prospect | Contacted | Engaged | Closed Won | Closed Lost | Rejected
+  // Which pipeline this contact belongs to. Selects the status vocabulary in
+  // lib/types.ts (STATUS_OPTIONS_BY_KIND) — see docs/ROADMAP.md D15.
+  kind          String   @default("customer") // customer | collaborator
+  // Status values differ per kind and live in lib/types.ts, not here, because a
+  // single schema comment cannot document two vocabularies. Free text either way.
+  status        String   @default("Prospect")
   labels        String? // comma-separated
   lastContact   DateTime?
   nextAction    String?
+  // The date half of nextAction. Free text alone cannot be queried, which is what
+  // /api/queue needs — see docs/ROADMAP.md task 1.2.
+  nextActionDue DateTime?
   notes         String?
   draftLink     String? // Gmail draft URL, set once a draft is created
   notesLink     String? // external notes doc link

@@ -1,0 +1,42 @@
+{
+  "projects": [
+    {
+      "name": "Example — Waitlist",
+      "description": "Warm inbound signups. Opt-in, not cold outreach.",
+      "approach": "Plain text, personal. Lead with when and where they signed up.",
+      "kind": "customer",
+      "contacts": [
+        {
+          "name": "Jamie Lee",
+          "email": "jamie@example.com",
+          "status": "Signed Up",
+          "labels": "waitlist",
+          "notesLink": null,
+          "nextAction": "Send waitlist intro email",
+          "nextActionDue": null,
+          "createdAt": "2026-05-01T09:00:00.000Z",
+          "notes": "Signed up via the waitlist form on 2026-05-01."
+        }
+      ]
+    },
+    {
+      "name": "Example — Partners",
+      "description": "Brands for co-marketing. Outbound, few, high-touch.",
+      "approach": "Founder-to-founder, one specific ask, no deck.",
+      "kind": "collaborator",
+      "contacts": [
+        {
+          "name": "Acme Co",
+          "email": "hello@acme.example",
+          "status": "Prospect",
+          "labels": "Tier 1, Category, LinkedIn",
+          "notesLink": "https://acme.example",
+          "nextAction": "Message the founder on LinkedIn",
+          "nextActionDue": "2026-08-21",
+          "createdAt": null,
+          "notes": "Contact: A. Person — Founder\nChannel: LinkedIn\n\nWhy they fit: ...\nAngle: ..."
+        }
+      ]
+    }
+  ]
+}

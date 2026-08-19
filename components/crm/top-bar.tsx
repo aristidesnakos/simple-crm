@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Avatar,
   AvatarFallback,
@@ -14,16 +17,35 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+const NAV = [
+  { href: "/", label: "Projects" },
+  { href: "/queue", label: "Queue" },
+];
+
 export function TopBar() {
   const { data: session, status } = useSession();
+  const pathname = usePathname();
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-4">
         <span className="text-sm font-semibold">Ari&apos;s CRM</span>
-        <span className="text-xs text-muted-foreground">
-          local build · v1
-        </span>
+        <nav className="flex items-center gap-1">
+          {NAV.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "rounded-md px-2 py-1 text-xs transition-colors hover:bg-accent",
+                pathname === item.href
+                  ? "font-medium text-foreground"
+                  : "text-muted-foreground"
+              )}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
       </div>
       {status === "loading" ? null : session ? (
         <DropdownMenu>

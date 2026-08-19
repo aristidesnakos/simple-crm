@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Account, Project, STATUS_OPTIONS } from "@/lib/types";
+import { Account, KINDS, Project } from "@/lib/types";
+import { defaultStatusFor, statusOptionsFor } from "@/lib/contacts";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Mail, ExternalLink, Sparkles } from "lucide-react";
+import { Mail, ExternalLink, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
 export function AccountDetail({
@@ -35,6 +36,7 @@ export function AccountDetail({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
+  const [drafting, setDrafting] = useState(false);
 
   useEffect(() => {
     setLocal(account);
@@ -81,6 +83,45 @@ export function AccountDetail({
     }
   }
 
+  // Each pipeline has its own status vocabulary, so switching kind can strand the
+  // current status outside the new list — the Select would render blank while the
+  // stored value stayed valid-looking in the database. Move both together instead.
+  async function changeKind(kind: string) {
+    const stillValid = statusOptionsFor(kind).includes(local!.status);
+    if (stillValid) {
+      await patch({ kind });
+      return;
+    }
+    const status = defaultStatusFor(kind);
+    await patch({ kind, status });
+    toast.info(`Status reset to "${status}" — the ${kind} pipeline has its own stages.`);
+  }
+
+  // Fills the composer; it does not create or send anything. The human still reviews,
+  // edits, and presses the Gmail button — see docs/ROADMAP.md task 1.14.
+  async function composeWithLlm() {
+    setDrafting(true);
+    try {
+      const res = await fetch("/api/compose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: local!.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Couldn't draft that email.");
+        return;
+      }
+      setSubject(data.subject);
+      setBody(data.body);
+      if (data.rationale) toast.info(data.rationale);
+    } catch {
+      toast.error("Couldn't reach the drafting service.");
+    } finally {
+      setDrafting(false);
+    }
+  }
+
   async function createDraft() {
     if (!local!.email) {
       toast.error("This account has no email address on file.");
@@ -124,7 +165,7 @@ export function AccountDetail({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div className="space-y-1.5">
             <Label>Project</Label>
             <Select
@@ -144,6 +185,21 @@ export function AccountDetail({
             </Select>
           </div>
           <div className="space-y-1.5">
+            <Label>Pipeline</Label>
+            <Select value={local.kind} onValueChange={changeKind}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {KINDS.map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {k}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
             <Label>Status</Label>
             <Select
               value={local.status}
@@ -153,7 +209,7 @@ export function AccountDetail({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {STATUS_OPTIONS.map((s) => (
+                {statusOptionsFor(local.kind).map((s) => (
                   <SelectItem key={s} value={s}>
                     {s}
                   </SelectItem>
@@ -183,14 +239,30 @@ export function AccountDetail({
           />
         </div>
 
-        <div className="space-y-1.5">
-          <Label>Next action</Label>
-          <Input
-            value={local.nextAction ?? ""}
-            onChange={(e) => setLocal({ ...local, nextAction: e.target.value })}
-            onBlur={() => patch({ nextAction: local.nextAction })}
-            placeholder="Follow up in 3 days"
-          />
+        <div className="grid grid-cols-[1fr_auto] gap-4">
+          <div className="space-y-1.5">
+            <Label>Next action</Label>
+            <Input
+              value={local.nextAction ?? ""}
+              onChange={(e) =>
+                setLocal({ ...local, nextAction: e.target.value })
+              }
+              onBlur={() => patch({ nextAction: local.nextAction })}
+              placeholder="Send waitlist intro email"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Due</Label>
+            {/* Patched on change rather than on blur, following the Select: a date
+                picker commits on selection, and waiting for a blur that may never
+                come would silently drop the edit. */}
+            <Input
+              type="date"
+              className="w-40"
+              value={local.nextActionDue?.slice(0, 10) ?? ""}
+              onChange={(e) => patch({ nextActionDue: e.target.value || null })}
+            />
+          </div>
         </div>
 
         <div className="space-y-1.5">
@@ -258,12 +330,22 @@ export function AccountDetail({
                 placeholder="Subject"
               />
               <Textarea
-                rows={6}
+                rows={10}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="Draft body — pre-filled from the project's email approach"
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={composeWithLlm}
+                  disabled={drafting}
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  {drafting ? "Drafting…" : "Draft with AI"}
+                </Button>
+                <div className="flex gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -274,6 +356,7 @@ export function AccountDetail({
                 <Button size="sm" onClick={createDraft} disabled={sending}>
                   {sending ? "Creating…" : "Create Gmail draft"}
                 </Button>
+                </div>
               </div>
             </div>
           )}

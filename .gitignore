@@ -57,3 +57,8 @@ yarn-error.log*
 !.vscode/extensions.json
 
 /node-modules
+
+# Real contact data — this repo is public. The loader
+# (prisma/import-mangood.ts) is shareable; the people in it are not.
+/prisma/contacts.local.json
+/docs/*.csv

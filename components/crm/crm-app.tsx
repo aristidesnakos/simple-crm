@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Account, Project } from "@/lib/types";
 import { TopBar } from "@/components/crm/top-bar";
 import { ProjectSidebar } from "@/components/crm/project-sidebar";
@@ -14,13 +15,18 @@ import {
 } from "@/components/ui/resizable";
 
 export function CrmApp() {
+  // Seeds the initial selection from ?project=&account=, which is how /queue links
+  // into a specific contact. Read in the useState initializer rather than an effect:
+  // an effect would clobber a selection the user had already made by the time it ran.
+  const searchParams = useSearchParams();
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    null
+    () => searchParams.get("project")
   );
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
-    null
+    () => searchParams.get("account")
   );
   const [loading, setLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -87,14 +93,27 @@ export function CrmApp() {
     return () => controller.abort();
   }, []);
 
+  // Which project the account selection currently belongs to. Needed because the
+  // effect below must distinguish "the user switched projects" from "this is the
+  // first render" — on first render there is nothing to clear, and clearing would
+  // throw away the ?account= that /queue deep-linked in.
+  const selectionProjectId = useRef<string | null>(null);
+
   useEffect(() => {
     if (!selectedProjectId) {
       accountsRequestId.current++; // invalidate anything still in flight
       setAccounts([]);
       setAccountsError(null);
+      selectionProjectId.current = null;
       return;
     }
-    setSelectedAccountId(null);
+    if (
+      selectionProjectId.current !== null &&
+      selectionProjectId.current !== selectedProjectId
+    ) {
+      setSelectedAccountId(null);
+    }
+    selectionProjectId.current = selectedProjectId;
     return loadAccounts(selectedProjectId);
   }, [selectedProjectId, loadAccounts]);
 

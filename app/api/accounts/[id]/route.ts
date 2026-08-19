@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeEmail } from "@/lib/contacts";
 
 export async function PATCH(
   request: NextRequest,
@@ -10,8 +11,8 @@ export async function PATCH(
   const data: Record<string, unknown> = {};
   for (const key of [
     "name",
-    "email",
     "status",
+    "kind",
     "labels",
     "nextAction",
     "notes",
@@ -21,8 +22,15 @@ export async function PATCH(
   ] as const) {
     if (body[key] !== undefined) data[key] = body[key];
   }
-  if (body.lastContact !== undefined) {
-    data.lastContact = body.lastContact ? new Date(body.lastContact) : null;
+  // email and the date fields sit outside the loop because each needs coercion:
+  // addresses are normalized (lib/contacts.ts), dates are strings crossing JSON.
+  if (body.email !== undefined) {
+    data.email = normalizeEmail(body.email);
+  }
+  for (const key of ["lastContact", "nextActionDue"] as const) {
+    if (body[key] !== undefined) {
+      data[key] = body[key] ? new Date(body[key]) : null;
+    }
   }
 
   // Status transitions are logged append-only (docs/ROADMAP.md §2.4). The update
