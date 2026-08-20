@@ -145,3 +145,28 @@ Archive Q1 (answer: fresh), Q3, Q4 (warm), Q7 are closed or void under D12/D13/D
 | Q2 | Which domain is the Workspace primary? Lock-in. | Task 0.a |
 | Q3 | Archive Q5 — why four domains rather than one? Four sender reputations divide an already-small n. | Nothing this week; revisit before domains 2–4 send. |
 | Q4 | Archive Q6 — do replies come from someone other than the person emailed? | Nothing now (D14 cut the index that cared). |
+
+---
+
+## 7. Known defects, deferred with triggers
+
+Found 2026-08-20 by a four-lens review. All verified against the code. None are
+scheduled: each is deferred to a **stated trigger**, so that "later" is a condition and
+not a mood. Fixed on the day they were found: the two create dialogs swallowing every
+server error, and `POST /api/projects` returning a body-less 500.
+
+| # | Defect | Trigger to fix |
+| --- | --- | --- |
+| E1 | Every `/api` route except NextAuth's is unauthenticated; `DELETE /api/projects/[id]` cascade-deletes silently. | **Any** non-localhost host. `proxy.ts` now fails closed on this, so the trigger enforces itself. Real per-user auth is still unbuilt. |
+| E3 | `lib/auth.ts` returns a stale expired token when no `refreshToken` is stored, with no `token.error`. `session.error` is read by nothing. | First real Gmail send. Expected to fire immediately. |
+| E4 | `draftLink` is built from `message.id`, not `draftId`; a missing id still toasts success and wipes a good link. | First real Gmail send. |
+| E5 | `Project.fromEmail` is set as `From:` with no `sendAs` verification; every Gmail error returns one opaque string. | The day `hello@mangood.app` is set on a project — i.e. Phase 0 task 0.b, not before. |
+| E6 | `patch()` has no in-flight guard; a slow PATCH can revert a newer edit. | First observed lost edit. Cheap to fix, impossible to notice — accept the exposure. |
+| E7 | No server-side `status`/`kind` validation; a bad value renders an unselectable `Select` with no UI path back. | First value that isn't in `STATUS_OPTIONS_BY_KIND`. |
+| E8 | `StatusEvent` only records changes made through the accounts PATCH route. Imports and Prisma Studio bypass it silently. `Interaction` inherits this. | Before writing any second import script. |
+| E9 | `/api/compose` sends contact names and notes to OpenRouter and onward to a third-party model. No disclosure, no opt-out, no record. | **Before `OPENROUTER_API_KEY` is ever set.** This is a disclosure gap, not a scale one — n does not make it better. |
+
+`Interaction` is migrated (`20260820134639_add_interaction_log`) and deliberately has no
+API and no UI: a timeline is worth more built against real replies than an empty table,
+and until an email is sent there is no conversation to lose. Build it after the first
+sends, not before.

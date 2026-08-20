@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Account, Project, STATUS_COLOR } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,10 +63,18 @@ export function AccountList({
         body: JSON.stringify({ projectId: project.id, name, email }),
       });
       const account = await res.json();
+      // Same silent-failure fix as project-sidebar's createProject: a failed POST used
+      // to leave the dialog open with no message at all.
+      if (!res.ok) {
+        toast.error(account?.error ?? `Couldn't create that contact (${res.status}).`);
+        return;
+      }
       onCreated(account);
       setName("");
       setEmail("");
       setOpen(false);
+    } catch {
+      toast.error("Couldn't reach the server.");
     } finally {
       setSaving(false);
     }

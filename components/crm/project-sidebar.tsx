@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,11 +45,20 @@ export function ProjectSidebar({
         body: JSON.stringify({ name, description, approach }),
       });
       const project = await res.json();
+      // Without the res.ok check this swallowed every server error: the POST returned
+      // a body-less 500, res.json() threw, and the rejection went unhandled — the
+      // dialog just sat there and the user retried the same input forever.
+      if (!res.ok) {
+        toast.error(project?.error ?? `Couldn't create that project (${res.status}).`);
+        return;
+      }
       onCreated({ ...project, _count: { accounts: 0 } });
       setName("");
       setDescription("");
       setApproach("");
       setOpen(false);
+    } catch {
+      toast.error("Couldn't reach the server.");
     } finally {
       setSaving(false);
     }

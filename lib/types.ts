@@ -43,6 +43,33 @@ export type StatusEvent = {
   changedAt: string;
 };
 
+// Interaction log vocabulary. The `Interaction` table is migrated and the API is not
+// built yet — the log UI is deliberately deferred until after the first real sends
+// (docs/ROADMAP.md §7), because a timeline is worth more built against real replies
+// than against an empty table. This constant exists now because prisma/schema.prisma's
+// comment on `Interaction.channel` names it as the source of truth for the allowed
+// values, and a schema comment pointing at nothing is how vocabularies drift.
+//
+// Free text server-side like every other status here, so treat this as the picker's
+// list rather than a guarantee about what is in the column.
+export const INTERACTION_CHANNELS = ["email", "call", "meeting", "note"] as const;
+
+// Notes have no direction; everything else does.
+export const INTERACTION_DIRECTIONS = ["outbound", "inbound"] as const;
+
+// Hand-mirrored from prisma/schema.prisma, like StatusEvent above. Dates are strings
+// because they cross JSON. `threadId` is null for everything written by hand and is
+// the hook the deferred Gmail thread index attaches to.
+export type Interaction = {
+  id: string;
+  accountId: string;
+  channel: string;
+  direction: string | null;
+  occurredAt: string;
+  summary: string;
+  threadId: string | null;
+};
+
 export const KINDS = ["customer", "collaborator"] as const;
 export const DEFAULT_KIND = "customer";
 

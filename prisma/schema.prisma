@@ -44,6 +44,7 @@ model Account {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   statusEvents  StatusEvent[]
+  interactions  Interaction[]
 }
 
 // Append-only log of Account.status transitions. Account.status is overwritten in
@@ -62,4 +63,40 @@ model StatusEvent {
   changedAt  DateTime @default(now())
 
   @@index([accountId, changedAt])
+}
+
+// Append-only record of what was actually said to a contact, written by hand.
+//
+// Account.notes is one mutable blob: editing it overwrites the previous state, so
+// nothing can reconstruct when a thing was said or in which direction. StatusEvent
+// answers "when did the stage change" but not "what happened". This table is the
+// half of that answer which does not depend on Phase 0 mail infrastructure
+// (docs/ROADMAP.md §3) — it works today, with no Gmail scope and no OAuth client.
+//
+// `threadId` is deliberately present and unused: the contact-scoped Gmail index
+// (parked under D14, unparked once sending is verified end-to-end) lands as rows in
+// this table rather than a second timeline, so the UI written now doesn't get
+// rewritten then. Headers only — bodies stay in Gmail, per the no-inbox-replication
+// constraint.
+model Interaction {
+  id        String  @id @default(cuid())
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  // Free text like every other vocabulary here; the allowed values live in
+  // lib/types.ts as INTERACTION_CHANNELS. Nothing validates it server-side.
+  channel   String  @default("note") // email | call | meeting | note
+  // Null for notes, which have no direction. outbound | inbound otherwise.
+  direction String?
+
+  // When it happened, which is not when it was typed — backfilling last week's call
+  // is the normal case, so this is settable and createdAt is not.
+  occurredAt DateTime @default(now())
+  summary    String
+  // Set only for entries derived from a real Gmail thread. Null for everything
+  // written by hand.
+  threadId   String?
+  createdAt  DateTime @default(now())
+
+  @@index([accountId, occurredAt])
 }
