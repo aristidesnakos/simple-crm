@@ -62,3 +62,8 @@ yarn-error.log*
 # (prisma/import-mangood.ts) is shareable; the people in it are not.
 /prisma/contacts.local.json
 /docs/*.csv
+
+# dev feedback capture (components/dev/dev-feedback.tsx) — local notes and
+# element screenshots from a testing session, not project history
+/.claude/dev-feedback.json
+/.claude/dev-feedback/

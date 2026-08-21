@@ -97,3 +97,21 @@ TypeScript: single alias `@/*` → `./*` (repo root, not `src/`). `tsconfig.json
 Session state is not threaded as props — `TopBar` and `AccountDetail` each call `useSession()` independently. Do the same rather than lifting it. `TopBar` is the only caller of `signIn`/`signOut`, hardcoded to `signIn("google")`.
 
 `components/ui/resizable.tsx` wraps **react-resizable-panels v4**, whose API differs from what older shadcn snippets use: `Group`/`Panel`/`Separator`, an `orientation` prop on the group, and sizes passed as strings (`defaultSize="18"`). Don't port v1-era `PanelGroup direction=` code into it.
+
+### Dev feedback capture
+
+`components/dev/dev-feedback.tsx` (ported from the swimmingrhodes-gr project) wraps a
+section so right-clicking it opens a comment box; submitting rasterizes that exact
+element with `html-to-image` and POSTs to `app/api/dev-feedback/route.ts`, which appends
+to the gitignored `.claude/dev-feedback.json` and `.claude/dev-feedback/*.png`.
+`.claude/skills/feedback/SKILL.md` is the other half — it reads the log, fixes each
+item, and marks entries resolved.
+
+Both halves are gated on `process.env.NODE_ENV !== "production"`: the component renders
+children with no wrapper and no JS, and the route 404s. Wrapped sections are named
+`Crm.TopBar`, `Crm.ProjectSidebar`, `Crm.AccountList`, `Crm.AccountDetail` (all in
+`crm-app.tsx`) and `Queue.List` (`queue-view.tsx`) — the `name` prop is the only link
+back to a file, so keep it matching the component. The wrapper is `display: contents`,
+so it never affects layout but also has no box of its own; capture targets its single
+child. Right-click is deliberately left alone over `input`/`textarea`/`select`/
+contenteditable so paste still works inside the account form.

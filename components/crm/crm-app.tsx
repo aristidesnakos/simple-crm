@@ -7,6 +7,7 @@ import { TopBar } from "@/components/crm/top-bar";
 import { ProjectSidebar } from "@/components/crm/project-sidebar";
 import { AccountList } from "@/components/crm/account-list";
 import { AccountDetail } from "@/components/crm/account-detail";
+import { DevFeedback } from "@/components/dev/dev-feedback";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
@@ -196,39 +197,47 @@ export function CrmApp() {
 
   return (
     <div className="flex h-full flex-col">
-      <TopBar />
+      <DevFeedback name="Crm.TopBar">
+        <TopBar />
+      </DevFeedback>
       <div className="min-h-0 flex-1">
         <ResizablePanelGroup orientation="horizontal">
           <ResizablePanel defaultSize="18" minSize="14" maxSize="28">
-            <ProjectSidebar
-              projects={projects}
-              selectedProjectId={selectedProjectId}
-              onSelect={setSelectedProjectId}
-              onCreated={handleProjectCreated}
-            />
+            <DevFeedback name="Crm.ProjectSidebar">
+              <ProjectSidebar
+                projects={projects}
+                selectedProjectId={selectedProjectId}
+                onSelect={setSelectedProjectId}
+                onCreated={handleProjectCreated}
+              />
+            </DevFeedback>
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel defaultSize="28" minSize="22" maxSize="40">
-            <AccountList
-              project={selectedProject}
-              accounts={accounts}
-              selectedAccountId={selectedAccountId}
-              error={accountsError}
-              onRetry={() =>
-                selectedProjectId && loadAccounts(selectedProjectId)
-              }
-              onSelect={setSelectedAccountId}
-              onCreated={handleAccountCreated}
-            />
+            <DevFeedback name="Crm.AccountList">
+              <AccountList
+                project={selectedProject}
+                accounts={accounts}
+                selectedAccountId={selectedAccountId}
+                error={accountsError}
+                onRetry={() =>
+                  selectedProjectId && loadAccounts(selectedProjectId)
+                }
+                onSelect={setSelectedAccountId}
+                onCreated={handleAccountCreated}
+              />
+            </DevFeedback>
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel defaultSize="54">
-            <AccountDetail
-              account={selectedAccount}
-              project={selectedProject}
-              projects={projects}
-              onUpdated={handleAccountUpdated}
-            />
+            <DevFeedback name="Crm.AccountDetail">
+              <AccountDetail
+                account={selectedAccount}
+                project={selectedProject}
+                projects={projects}
+                onUpdated={handleAccountUpdated}
+              />
+            </DevFeedback>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
