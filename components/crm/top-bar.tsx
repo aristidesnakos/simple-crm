@@ -27,6 +27,14 @@ export function TopBar() {
   const { data: session, status } = useSession();
   const pathname = usePathname();
 
+  // `lib/auth.ts` sets this when the Google refresh fails, which leaves a session that
+  // still looks signed in but carries a dead credential — every Gmail call then returns
+  // an opaque 502. Until this was read, nothing in the app surfaced it. Same `unknown`
+  // cast idiom as the accessToken, since module augmentation isn't set up.
+  const expired =
+    (session as unknown as { error?: string })?.error ===
+    "RefreshAccessTokenError";
+
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
       <div className="flex items-center gap-4">
@@ -48,7 +56,11 @@ export function TopBar() {
           ))}
         </nav>
       </div>
-      {status === "loading" ? null : session ? (
+      {status === "loading" ? null : expired ? (
+        <Button size="sm" variant="outline" onClick={() => signIn("google")}>
+          Session expired — sign in again
+        </Button>
+      ) : session ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2">
