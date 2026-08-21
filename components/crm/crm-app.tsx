@@ -176,6 +176,16 @@ export function CrmApp() {
     setSelectedProjectId(created.id);
   }
 
+  function handleProjectUpdated(updated: Project) {
+    // The PATCH response has no `_count` — same shape gap as the POST — so carry the
+    // existing one over rather than letting the row fall back to "0 accounts".
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === updated.id ? { ...updated, _count: p._count } : p
+      )
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -209,6 +219,7 @@ export function CrmApp() {
                 selectedProjectId={selectedProjectId}
                 onSelect={setSelectedProjectId}
                 onCreated={handleProjectCreated}
+                onUpdated={handleProjectUpdated}
               />
             </DevFeedback>
           </ResizablePanel>

@@ -15,7 +15,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus } from "lucide-react";
+import { Plus, Settings2 } from "lucide-react";
+import { ProjectSettingsDialog } from "@/components/crm/project-settings-dialog";
 import { cn } from "@/lib/utils";
 
 export function ProjectSidebar({
@@ -23,17 +24,22 @@ export function ProjectSidebar({
   selectedProjectId,
   onSelect,
   onCreated,
+  onUpdated,
 }: {
   projects: Project[];
   selectedProjectId: string | null;
   onSelect: (id: string) => void;
   onCreated: (project: Project) => void;
+  onUpdated: (project: Project) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [approach, setApproach] = useState("");
+  const [fromEmail, setFromEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  // Which project the settings dialog is editing; null means it's closed.
+  const [editing, setEditing] = useState<Project | null>(null);
 
   async function createProject() {
     if (!name.trim()) return;
@@ -42,7 +48,7 @@ export function ProjectSidebar({
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description, approach }),
+        body: JSON.stringify({ name, description, approach, fromEmail }),
       });
       const project = await res.json();
       // Without the res.ok check this swallowed every server error: the POST returned
@@ -56,6 +62,7 @@ export function ProjectSidebar({
       setName("");
       setDescription("");
       setApproach("");
+      setFromEmail("");
       setOpen(false);
     } catch {
       toast.error("Couldn't reach the server.");
@@ -109,6 +116,21 @@ export function ProjectSidebar({
                   placeholder="What Claude should draw on when drafting outreach for this project"
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pfrom">Send from</Label>
+                <Input
+                  id="pfrom"
+                  type="email"
+                  value={fromEmail}
+                  onChange={(e) => setFromEmail(e.target.value)}
+                  placeholder="e.g. hello@mangood.app"
+                />
+                <p className="text-xs text-muted-foreground">
+                  The From: address on drafts for this project. Leave blank to use the
+                  signed-in mailbox. Gmail rejects an address that isn&apos;t a verified
+                  send-as alias on that account.
+                </p>
+              </div>
             </div>
             <DialogFooter>
               <Button onClick={createProject} disabled={saving || !name.trim()}>
@@ -125,22 +147,41 @@ export function ProjectSidebar({
           </p>
         )}
         {projects.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => onSelect(p.id)}
-            className={cn(
-              "mb-1 w-full rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent",
-              selectedProjectId === p.id && "bg-accent"
-            )}
-          >
-            <div className="font-medium truncate">{p.name}</div>
-            <div className="text-xs text-muted-foreground">
-              {p._count?.accounts ?? 0} account
-              {(p._count?.accounts ?? 0) === 1 ? "" : "s"} · {p.status}
-            </div>
-          </button>
+          // The row is a wrapper rather than a bare button because the gear is a
+          // second control: a button can't be nested inside a button.
+          <div key={p.id} className="group relative mb-1">
+            <button
+              onClick={() => onSelect(p.id)}
+              className={cn(
+                "w-full rounded-md py-2 pl-3 pr-9 text-left text-sm transition-colors hover:bg-accent",
+                selectedProjectId === p.id && "bg-accent"
+              )}
+            >
+              <div className="font-medium truncate">{p.name}</div>
+              <div className="text-xs text-muted-foreground">
+                {p._count?.accounts ?? 0} account
+                {(p._count?.accounts ?? 0) === 1 ? "" : "s"} · {p.status}
+              </div>
+            </button>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={`Settings for ${p.name}`}
+              onClick={() => setEditing(p)}
+              // Hidden until hover, but focus-visible keeps it reachable by keyboard.
+              className="absolute right-1 top-1.5 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         ))}
       </div>
+      <ProjectSettingsDialog
+        project={editing}
+        open={editing !== null}
+        onOpenChange={(next) => !next && setEditing(null)}
+        onUpdated={onUpdated}
+      />
     </div>
   );
 }

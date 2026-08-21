@@ -14,6 +14,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -59,10 +60,18 @@ export function TopBar() {
               </Avatar>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled className="opacity-100">
-              {session.user?.email}
-            </DropdownMenuItem>
+          {/* w-auto is load-bearing: DropdownMenuContent defaults to
+              w-(--radix-dropdown-menu-trigger-width), and the trigger here is a 28px
+              avatar, so the menu collapsed to its min-w-32 and clipped the email
+              against overflow-x-hidden. */}
+          <DropdownMenuContent align="end" className="w-auto min-w-56">
+            <div className="px-2 py-1.5">
+              <p className="text-xs text-muted-foreground">Signed in as</p>
+              <p className="mt-0.5 text-sm font-medium break-all">
+                {session.user?.email}
+              </p>
+            </div>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => signOut()}>
               Sign out
             </DropdownMenuItem>
