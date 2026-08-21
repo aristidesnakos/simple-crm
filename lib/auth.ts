@@ -1,5 +1,9 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import {
+  refreshGoogleToken,
+  saveGoogleCredential,
+} from "@/lib/google-credential";
 
 // Gmail scope needed so the app can create real Gmail drafts on the user's behalf.
 // gmail.compose covers creating/updating/sending drafts (but not reading arbitrary mail).
@@ -40,6 +44,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.scope = account.scope;
         // A fresh consent clears any error the previous grant died with.
         token.error = undefined;
+
+        // Mirror the grant into the database. This is the only moment Google hands
+        // over a refresh token, so it is the only moment it can be persisted — and
+        // persisting it is what lets code with no browser request behind it reach
+        // Gmail later. Failure is logged, never thrown: a database problem must not
+        // take down sign-in, and the JWT still carries everything this session needs.
+        if (token.email && token.accessToken) {
+          try {
+            await saveGoogleCredential({
+              email: token.email as string,
+              accessToken: token.accessToken as string,
+              expiresAt: new Date(
+                (token.accessTokenExpires as number | undefined) ?? Date.now()
+              ),
+              refreshToken: token.refreshToken as string | undefined,
+              scope: account.scope,
+            });
+          } catch (err) {
+            console.error("Couldn't persist the Google credential", err);
+          }
+        }
       }
 
       // Token still valid — reuse it. The 5-minute buffer matters because the check
@@ -53,24 +78,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token;
       }
 
-      // Expired — refresh it.
+      // Expired — refresh it. The HTTP exchange lives in lib/google-credential.ts so
+      // the background path and this one cannot drift apart.
       if (token.refreshToken) {
         try {
-          const res = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              client_id: process.env.AUTH_GOOGLE_ID!,
-              client_secret: process.env.AUTH_GOOGLE_SECRET!,
-              grant_type: "refresh_token",
-              refresh_token: token.refreshToken as string,
-            }),
-          });
-          const refreshed = await res.json();
-          if (!res.ok) throw refreshed;
-          token.accessToken = refreshed.access_token;
-          token.accessTokenExpires = Date.now() + refreshed.expires_in * 1000;
+          const refreshed = await refreshGoogleToken(
+            token.refreshToken as string
+          );
+          token.accessToken = refreshed.accessToken;
+          token.accessTokenExpires = refreshed.expiresAt.getTime();
           token.error = undefined; // recovered from an earlier failure
+
+          if (token.email) {
+            try {
+              await saveGoogleCredential({
+                email: token.email as string,
+                accessToken: refreshed.accessToken,
+                expiresAt: refreshed.expiresAt,
+                scope: refreshed.scope,
+              });
+            } catch (err) {
+              console.error("Couldn't persist the refreshed credential", err);
+            }
+          }
         } catch (err) {
           console.error("Failed to refresh Google access token", err);
           token.error = "RefreshAccessTokenError";

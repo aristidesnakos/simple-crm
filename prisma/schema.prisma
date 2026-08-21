@@ -100,3 +100,33 @@ model Interaction {
 
   @@index([accountId, occurredAt])
 }
+
+// The signed-in Google identity's tokens, persisted server-side.
+//
+// Auth.js keeps owning sign-in, the session cookie, and CSRF; this exists for the one
+// thing a JWT cookie structurally cannot do — hand a refresh token to code running
+// outside a browser request, which is what reply polling needs. It is deliberately NOT
+// the Auth.js Prisma adapter: that would require models named User/Session/Account, and
+// this schema's `Account` is a CRM contact. See docs/ROADMAP.md D18 — the
+// Account→Contact rename is triggered by adopting the adapter, which this avoids.
+//
+// Single row per Google address; single-tenant by design (D18), so in practice one row.
+//
+// SECURITY: refreshToken grants ongoing Gmail access until revoked at
+// myaccount.google.com/permissions. prisma/dev.db is gitignored and unencrypted on
+// disk. That is fine on localhost and is not fine hosted — the same line proxy.ts draws.
+model GoogleCredential {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  accessToken  String
+  // Null when Google declined to reissue one. `prompt=consent` in lib/auth.ts is what
+  // makes that unlikely, since Google only returns a refresh token on first consent.
+  refreshToken String?
+  expiresAt    DateTime
+  // The scopes of the grant that produced this token, which are the scopes of the
+  // ORIGINAL consent — a refresh never widens them. Recorded so a route can tell
+  // "never granted" from "Gmail is down" instead of surfacing both as a 502.
+  scope        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
