@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  buildFooter,
+  encodeSubject,
+  resolveSenderIdentity,
+  senderIdentityProblem,
+  type SenderIdentity,
+} from "@/lib/outreach";
 
 // Builds an RFC 2822 message and base64url-encodes it, per the Gmail API's
 // drafts.create requirements.
@@ -10,6 +17,7 @@ function buildRawMessage({
   from,
   subject,
   body,
+  identity,
 }: {
   to: string;
   // The campaign's sending identity (Project.fromEmail). Omitted when the project has
@@ -19,14 +27,27 @@ function buildRawMessage({
   from?: string | null;
   subject: string;
   body: string;
+  // Who is legally sending. The footer is appended HERE rather than in the route body,
+  // because this function is the single chokepoint every outbound message passes through
+  // — including any future POST /api/gmail/send. Putting it in the route would leave the
+  // next send path uncovered.
+  //
+  // And not in the compose system prompt: a model given a formatting instruction complies
+  // most of the time, which is the wrong reliability class for a statutory disclosure, and
+  // it would paraphrase the address. A paraphrased postal address is not a postal address.
+  identity: SenderIdentity;
 }) {
   const message = [
     `To: ${to}`,
     ...(from ? [`From: ${from}`] : []),
-    `Subject: ${subject}`,
+    // Encoded rather than interpolated raw: headers must be ASCII, and the default
+    // composed subject contains an em dash. See lib/outreach.ts.
+    `Subject: ${encodeSubject(subject)}`,
     "Content-Type: text/plain; charset=utf-8",
     "",
     body,
+    "",
+    buildFooter(identity),
   ].join("\n");
 
   return Buffer.from(message)
@@ -68,6 +89,16 @@ export async function POST(request: NextRequest) {
       })
     : null;
 
+  // Fail closed, before any Gmail call. A footer that silently omits itself is worse than
+  // no footer, because the message looks compliant. 500 rather than 400 is right: the
+  // caller did nothing wrong, the deployment is misconfigured — the same shape as the 501
+  // POST /api/compose returns for a missing OPENROUTER_API_KEY.
+  const identity = resolveSenderIdentity();
+  const identityProblem = senderIdentityProblem(identity);
+  if (identityProblem) {
+    return NextResponse.json({ error: identityProblem }, { status: 500 });
+  }
+
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: accessToken });
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
@@ -78,6 +109,7 @@ export async function POST(request: NextRequest) {
       from: account?.project.fromEmail,
       subject,
       body,
+      identity,
     });
     const draft = await gmail.users.drafts.create({
       userId: "me",
