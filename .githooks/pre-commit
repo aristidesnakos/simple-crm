@@ -21,15 +21,19 @@
 set -e
 
 # Paths that must never be committed, as extended regexes matched against staged names.
-BLOCKED='(^|/)[^/]*\.db($|-journal$|-wal$|-shm$)|(^|/)prisma/contacts\.local\.json$|^docs/[^/]*\.csv$|^\.claude/dev-feedback\.json$|^\.claude/dev-feedback/'
+# `.env` anything except .env.example: these hold the OAuth client secret, AUTH_SECRET,
+# and the sender identity — a real legal name and a real postal address. An ad-hoc copy
+# like .env.bak.1699, taken before an edit, is the shape that slips past a narrower rule.
+BLOCKED='(^|/)[^/]*\.db($|-journal$|-wal$|-shm$)|(^|/)prisma/contacts\.local\.json$|^docs/[^/]*\.csv$|^\.claude/dev-feedback\.json$|^\.claude/dev-feedback/|(^|/)\.env($|\.)'
+ALLOWED='(^|/)\.env\.example$'
 
 staged=$(git diff --cached --name-only --diff-filter=AM)
 [ -z "$staged" ] && exit 0
 
-offenders=$(printf '%s\n' "$staged" | grep -E "$BLOCKED" || true)
+offenders=$(printf '%s\n' "$staged" | grep -E "$BLOCKED" | grep -vE "$ALLOWED" || true)
 
 if [ -n "$offenders" ]; then
-  echo "pre-commit: refusing to commit files that hold real contact data." >&2
+  echo "pre-commit: refusing to commit files that hold real contact data or secrets." >&2
   echo >&2
   printf '%s\n' "$offenders" | sed 's/^/  /' >&2
   echo >&2

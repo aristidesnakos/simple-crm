@@ -30,11 +30,14 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files — these hold your Google OAuth client secret and AUTH_SECRET.
+# env files — these hold the Google OAuth client secret, AUTH_SECRET, and the sender
+# identity (a real legal name and a real postal address, i.e. personal data).
 # .env.example is committed as the template; real values never are.
-.env
-.env*.local
-.env.production
+#
+# `.env*` and not `.env` plus a list: the enumerated form covered .env, .env*.local and
+# .env.production but NOT an ad-hoc copy like `.env.bak.1699` or `.env.old`, which is
+# exactly the shape a backup taken before an edit has. One glob, one exception.
+.env*
 !.env.example
 
 # database — local SQLite data (your actual CRM contents) stays out of git
