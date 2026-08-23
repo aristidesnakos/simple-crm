@@ -74,14 +74,24 @@ export function AccountDetail({
   }, []);
 
   // Keyed on the project as well as the account: switching project without
-  // switching account used to leave the previous project's template in the
+  // switching account used to leave the previous project's subject in the
   // composer. See docs/ROADMAP.md task 1.n.
+  //
+  // The body starts EMPTY. It used to be pre-filled with Project.approach, which reads
+  // like a draft and is not one — it is a brief addressed to the writer ("Plain-text,
+  // personal. A new sending domain lands in Promotions if it looks like a template…").
+  // With no OPENROUTER_API_KEY there is no drafting step to replace it, so pressing
+  // "Create Gmail draft" put the campaign's internal notes into a real message to a real
+  // contact. Caught once by a human reading the draft; the next one would not be.
+  //
+  // The brief is now rendered read-only beside the composer instead (see below), which
+  // is where it was always useful — visible while you write, impossible to send.
   useEffect(() => {
     if (account) {
       setSubject(`Following up${project ? ` — ${project.name}` : ""}`);
-      setBody(project?.approach ? `${project.approach}\n\n` : "");
+      setBody("");
     }
-  }, [account?.id, project?.id, project?.name, project?.approach]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [account?.id, project?.id, project?.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!local) {
     return (
@@ -412,6 +422,16 @@ export function AccountDetail({
 
           {session && !suppressed && composeOpen && (
             <div className="space-y-2 rounded-lg border p-3">
+              {project?.approach && (
+                <details className="rounded-md border bg-muted/40 p-2" open>
+                  <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
+                    How to write for this campaign — a brief for you, not part of the message
+                  </summary>
+                  <pre className="mt-1.5 whitespace-pre-wrap font-sans text-xs text-muted-foreground">
+                    {project.approach}
+                  </pre>
+                </details>
+              )}
               <Input
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
@@ -421,7 +441,7 @@ export function AccountDetail({
                 rows={10}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
-                placeholder="Draft body — pre-filled from the project's email approach"
+                placeholder="Write the email, or use Draft with AI"
               />
               <div className="flex items-center justify-between gap-2">
                 <Button
@@ -441,7 +461,11 @@ export function AccountDetail({
                 >
                   Cancel
                 </Button>
-                <Button size="sm" onClick={createDraft} disabled={sending}>
+                <Button
+                  size="sm"
+                  onClick={createDraft}
+                  disabled={sending || !body.trim()}
+                >
                   {sending ? "Creating…" : "Create Gmail draft"}
                 </Button>
                 </div>

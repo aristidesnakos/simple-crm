@@ -62,6 +62,9 @@ export function senderIdentityProblem(identity: SenderIdentity): string | null {
 //
 // The word "stop" is what OPT_OUT_SOURCES' `reply` is named for. If this wording changes,
 // change the register entry with it.
+// Trailing whitespace on the body is trimmed by the caller before this is appended:
+// a body ending in newlines otherwise pushes the signature several blank lines down,
+// which reads as sloppy in the one part of the message that is a legal disclosure.
 export function buildFooter(identity: SenderIdentity): string {
   return [
     "-- ",
