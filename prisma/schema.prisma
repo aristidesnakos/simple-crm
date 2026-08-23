@@ -41,6 +41,30 @@ model Account {
   notes         String?
   draftLink     String? // Gmail draft URL, set once a draft is created
   notesLink     String? // external notes doc link
+
+  // --- Provenance (docs/requirements/01-PRD REQ-08) ---------------------------------
+  // Where this contact came from, structured. Previously this lived in `notes` as prose,
+  // which the detail form overwrites wholesale on blur — consent evidence in a field that
+  // can be destroyed by a stray keystroke is not evidence. Allowed values live in
+  // lib/types.ts as SOURCE_TYPES.
+  sourceType    String? // waitlist_form | partner_sheet | referral | manual | research
+  // The specific instance: which sheet, which form, who referred. Free text.
+  sourceDetail  String?
+  // When they affirmatively opted in, for the sources where that concept applies. Null is
+  // meaningful — it means we have no consent on file, which is exactly what the
+  // jurisdiction gate in app/api/gmail/draft/route.ts reads.
+  consentedAt   DateTime?
+
+  // --- Jurisdiction (docs/requirements/01-PRD REQ-10) -------------------------------
+  // Coarse and hand-set. We record the flag; we deliberately do not encode the statutes
+  // (PRD N1). Allowed values live in lib/types.ts as JURISDICTIONS, and the subset that
+  // gates a first contact is CONSENT_FIRST_JURISDICTIONS.
+  //
+  // Deliberately NOT backfilled by script: guessing it from an email domain is false
+  // confidence — a .com says nothing, and the company's TLD is not the recipient's
+  // location. It is a human pass (REQ-10b).
+  jurisdiction  String? // US | EU | UK | CA | JP | OTHER | UNKNOWN
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   statusEvents  StatusEvent[]
@@ -129,4 +153,39 @@ model GoogleCredential {
   scope        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Do-not-contact, keyed on the person rather than on a campaign row
+// (docs/requirements/01-PRD REQ-01).
+//
+// Not a status value, deliberately: `status` is unvalidated free text that the detail
+// form overwrites in place (docs/ROADMAP.md E7), so a suppression expressed as a status
+// is one careless edit away from being undone, and the queue would happily surface the
+// row again. A timestamp cannot be set by accident and reads the same to a lawyer as it
+// does to a query.
+//
+// And not a column on Account, also deliberately. Account is scoped to a Project,
+// `email` carries no unique constraint, and the same address legitimately belongs to
+// several campaigns — a per-row flag would leave the same human in a second project's
+// queue. It would also cascade-delete with the Account, which is exactly the record
+// docs/requirements/04-COMPLIANCE-REGISTER §6.3 says must SURVIVE an erasure request:
+// erase everything else, keep the address and the timestamp, so the next import cannot
+// re-add them.
+//
+// The address is the primary key because it is the only identifier we hold that means
+// the same thing across campaigns. Always normalized through normalizeEmail() in
+// lib/contacts.ts before it reaches here — a suppression stored in mixed case is a
+// suppression that does not match.
+//
+// There is deliberately no relation to Account: a relation needs a foreign key, and the
+// whole point is that this outlives the row. Joining is done in application code.
+model Suppression {
+  email      String   @id
+  optedOutAt DateTime @default(now())
+  // How the opt-out reached us. Allowed values live in lib/types.ts as OPT_OUT_SOURCES.
+  source     String? // reply | verbal | form | manual
+  // What they actually said, verbatim where possible. This is the evidence.
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
