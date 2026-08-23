@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# Refuse to commit real contact data to a public repository.
+#
+# docs/requirements/01-PRD-outreach-compliance.md F11: this remote is PUBLIC, and the only
+# thing keeping 34 identifiable people's names, addresses and research notes out of it is
+# .gitignore. That is one `git add -f` away from being wrong, and git history is not a
+# place you can delete somebody's email address from afterwards.
+#
+# This hook is the second barrier. It is not a substitute for .gitignore — it is what
+# catches the moment someone overrides it.
+#
+# Install (not automatic, hooks are not cloned):
+#   git config core.hooksPath .githooks
+#
+# Bypass, if you genuinely mean it:
+#   git commit --no-verify
+#
+# See docs/requirements/03-DELIVERY-PLAN.md CRM-114 and doc 04 CTL-15.
+
+set -e
+
+# Paths that must never be committed, as extended regexes matched against staged names.
+BLOCKED='(^|/)[^/]*\.db($|-journal$|-wal$|-shm$)|(^|/)prisma/contacts\.local\.json$|^docs/[^/]*\.csv$|^\.claude/dev-feedback\.json$|^\.claude/dev-feedback/'
+
+staged=$(git diff --cached --name-only --diff-filter=AM)
+[ -z "$staged" ] && exit 0
+
+offenders=$(printf '%s\n' "$staged" | grep -E "$BLOCKED" || true)
+
+if [ -n "$offenders" ]; then
+  echo "pre-commit: refusing to commit files that hold real contact data." >&2
+  echo >&2
+  printf '%s\n' "$offenders" | sed 's/^/  /' >&2
+  echo >&2
+  echo "This repository is public. These paths are gitignored for a reason; staging one" >&2
+  echo "means it was force-added. Unstage with:" >&2
+  echo >&2
+  printf '%s\n' "$offenders" | sed 's/^/  git restore --staged /' >&2
+  echo >&2
+  echo "If you are certain, 'git commit --no-verify' bypasses this — but read" >&2
+  echo "docs/requirements/04-COMPLIANCE-REGISTER CTL-15 first." >&2
+  exit 1
+fi
+
+exit 0

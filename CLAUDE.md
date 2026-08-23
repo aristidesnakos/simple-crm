@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+**Install the pre-commit hook once per clone:** `git config core.hooksPath .githooks`. Hooks are
+not cloned, so this is manual. It refuses staged `*.db`, `prisma/contacts.local.json`,
+`docs/*.csv`, and `.claude/dev-feedback/*` — the repo is public and `.gitignore` is otherwise the
+only barrier.
+
 ```bash
 npm run dev                    # next dev
 npm run build                  # next build
@@ -20,9 +25,9 @@ npx tsx prisma/seed.ts         # optional seed — must be run this way
 
 There is no test framework in this repo — don't invent test commands. `next.config.ts` is empty boilerplate and `eslint.config.mjs` adds no custom rules beyond `eslint-config-next`, so neither is a place to look for behavior.
 
-Prisma is **v5** (`^5.22.0`) with SQLite and four migrations (`init`, `add_status_event`, `add_kind_and_due`, `add_interaction_log`). `prisma/dev.db` is **gitignored, not committed** (`.gitignore` excludes `*.db` and `/prisma/*.db`) — it holds real contact data, so never `git add -f` it. Same for `/prisma/contacts.local.json` and `/docs/*.csv`, which are also gitignored real data. Note `skills-lock.json` pins nine Prisma skills including `prisma-upgrade-v7` — the repo is not on v7, so don't follow v7-shaped guidance against this schema.
+Prisma is **v5** (`^5.22.0`) with SQLite and six migrations (`init`, `add_status_event`, `add_kind_and_due`, `add_interaction_log`, `add_google_credential`, `add_consent_and_suppression`). **Restart `next dev` after running a migration** — a server started earlier holds the old generated client in memory and every write with a new column 500s with `Unknown argument`, which looks like a bug in your route and is not. `prisma/dev.db` is **gitignored, not committed** (`.gitignore` excludes `*.db` and `/prisma/*.db`) — it holds real contact data, so never `git add -f` it. Same for `/prisma/contacts.local.json` and `/docs/*.csv`, which are also gitignored real data. Note `skills-lock.json` pins nine Prisma skills including `prisma-upgrade-v7` — the repo is not on v7, so don't follow v7-shaped guidance against this schema.
 
-Env vars (`.env`, see `.env.example`): `DATABASE_URL` and `AUTH_SECRET` are required. `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` gate Google sign-in and Gmail drafts; `OPENROUTER_API_KEY` (optional `OPENROUTER_MODEL`) gates `/api/compose` LLM drafting, which returns 501 without it. `CRM_I_KNOW_THE_API_IS_UNAUTHENTICATED=true` disables the `proxy.ts` host check (see below). Everything else works with no keys at all. See README.md for the Google Cloud OAuth setup (Gmail API + `gmail.compose` scope + `http://localhost:3000/api/auth/callback/google` redirect).
+Env vars (`.env`, see `.env.example`): `DATABASE_URL` and `AUTH_SECRET` are required. `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` gate Google sign-in and Gmail drafts; `OPENROUTER_API_KEY` (optional `OPENROUTER_MODEL`) gates `/api/compose` LLM drafting, which returns 501 without it. `CRM_SENDER_LEGAL_NAME` and `CRM_SENDER_POSTAL_ADDRESS` are **required for drafting** — `POST /api/gmail/draft` fails closed with a 500 naming the missing one, because every outreach email must carry a compliant footer (RS-01 REQ-06). `CRM_I_KNOW_THE_API_IS_UNAUTHENTICATED=true` disables the `proxy.ts` host check (see below). Everything else works with no keys at all — but drafting is no longer in that set. See README.md for the Google Cloud OAuth setup (Gmail API + `gmail.compose` scope + `http://localhost:3000/api/auth/callback/google` redirect).
 
 ## Architecture
 
@@ -41,7 +46,7 @@ The division of labor: **children own the `fetch`, `CrmApp` owns the state.** Th
 
 `account-detail.tsx` is an **inline auto-saving form, not a dialog**: it holds a `local` copy, mirrors on `onChange`, and PATCHes on `onBlur` with only the changed fields (the exceptions patch immediately: `Select` on `onValueChange`, the due-date input on change, and the pipeline `Select` via `changeKind`, which may patch *two* fields and toast when the current status isn't valid for the new kind). Its `patch()` rolls back `local` and toasts on failure, but has **no in-flight guard**, so blur-fired requests can race: if a slow PATCH resolves after a fast one, its stale full-row response overwrites the newer edit in the parent array. `composeWithLlm`, `createDraft`, and `patch` all check `!res.ok` and raise `sonner` toasts. Its state effects key on `account?.id` with `exhaustive-deps` disabled, so a parent update to the *same* account won't refresh `local`. The compose-template effect is the exception — it keys on the project too, so switching project does refresh it.
 
-Server-side, every write path hardcodes its own field list, so **adding a column to `Account` means four edits**: `prisma/schema.prisma`, the POST create in `app/api/accounts/route.ts`, the PATCH whitelist in `app/api/accounts/[id]/route.ts`, and `lib/types.ts`. `Project` has the same POST/PATCH duplication. Anything needing coercion takes a fifth spot *outside* the whitelist loop: `email` goes through `normalizeEmail`, and `lastContact`/`nextActionDue` through a second loop that does `new Date()`. The accounts PATCH update runs inside a `$transaction` that also writes a `StatusEvent` on any status change — a new field belongs inside that transaction, not around it.
+Server-side, every write path hardcodes its own field list, so **adding a column to `Account` means four edits**: `prisma/schema.prisma`, the POST create in `app/api/accounts/route.ts`, the PATCH whitelist in `app/api/accounts/[id]/route.ts`, and `lib/types.ts`. One field on the `Account` *type* is **not** a column and must never be added to a whitelist: `optedOutAt` is derived per-request by the accounts GET from the `Suppression` table (see below). `Project` has the same POST/PATCH duplication. Anything needing coercion takes a fifth spot *outside* the whitelist loop: `email` goes through `normalizeEmail`, and `lastContact`/`nextActionDue` through a second loop that does `new Date()`. The accounts PATCH update runs inside a `$transaction` that also writes a `StatusEvent` on any status change — a new field belongs inside that transaction, not around it.
 
 Search lives only in `AccountList`: client-side over the already-loaded accounts, matching `name`, `email`, and the raw `labels` string. Projects have no search or filter.
 
@@ -65,7 +70,42 @@ Neither constant constrains the other: the `Select` in `account-detail` is fed t
 
 Naming trap: the Prisma `Account` model is a **CRM contact**, which collides with NextAuth's own `Account` table. Adding a Prisma adapter later will require renaming one of them.
 
-`POST /api/gmail/draft` reads that `accessToken` from `auth()`, builds a base64url RFC 2822 message, calls `gmail.users.drafts.create`, and writes `draftLink` back onto the Account. The link is built from the nested `message.id` — **this is correct and deliberate**: the Gmail UI resolves `#drafts?compose=<message id>`, not the draft resource id, so don't "fix" it to `draft.data.id`. The mailbox path is the url-encoded signed-in email, not `u/0`. The write-back is conditional, though — if Gmail ever omits that nested id the route still returns 200, the client toasts success, and a previously good `draftLink` is blanked in memory while the DB keeps the old value. The message also carries a `From:` header from `Project.fromEmail` when set, which is why the account is loaded before the Gmail call; Gmail rejects a `From` that isn't a verified `sendAs` alias, and `gmail.compose` can't enumerate aliases to check. Signing in is optional overall: the CRM works fully without Google, only drafting needs it.
+`app/layout.tsx` strips `accessToken` — and **only** `accessToken` — from the session before it
+reaches `<SessionProvider>`, so a live `gmail.compose` credential is not serialized into every
+page's RSC payload. `session.error` must stay: `top-bar.tsx` reads it to show the re-auth prompt,
+and removing it silently reverts that.
+
+`POST /api/gmail/draft` reads that `accessToken` from `auth()`, builds a base64url RFC 2822 message, calls `gmail.users.drafts.create`, and writes `draftLink` back onto the Account. `buildRawMessage` appends the compliant footer (from `lib/outreach.ts`) and RFC 2047-encodes the
+`Subject:` header. Both belong in that function and not in the route body, because it is the single
+chokepoint every outbound message passes through including any future send path. The subject
+encoding is not optional: headers must be ASCII, and the composer seeds every subject with an em
+dash. The link is built from the nested `message.id` — **this is correct and deliberate**: the Gmail UI resolves `#drafts?compose=<message id>`, not the draft resource id, so don't "fix" it to `draft.data.id`. The mailbox path is the url-encoded signed-in email, not `u/0`. The write-back is conditional, though — if Gmail ever omits that nested id the route still returns 200, the client toasts success, and a previously good `draftLink` is blanked in memory while the DB keeps the old value. The message also carries a `From:` header from `Project.fromEmail` when set, which is why the account is loaded before the Gmail call; Gmail rejects a `From` that isn't a verified `sendAs` alias, and `gmail.compose` can't enumerate aliases to check. Signing in is optional overall: the CRM works fully without Google, only drafting needs it.
+
+### Suppression is a table, not a column — do not "simplify" it
+
+`Suppression` (`email` as primary key, `optedOutAt`, `source`, `note`) is the do-not-contact
+record, and every enforcement point matches on the **normalized email address**, never on an
+account id. Two properties depend on that and both look like accidents until you know:
+
+- **It spans campaigns.** `Account` is scoped to a `Project` and `email` has no unique
+  constraint, so the same person legitimately holds rows in several campaigns. A column would
+  suppress one row and leave the others in the queue and draftable.
+- **It survives erasure.** There is deliberately **no relation** to `Account`, so no cascade.
+  Deleting a contact leaves their suppression standing, which is why re-creating or re-importing
+  them immediately finds them suppressed with a timestamp older than the row. That is
+  `docs/requirements/04-COMPLIANCE-REGISTER` §6.3's erasure-plus-objection resolution working,
+  not a bug. Do not add a cascade and do not clear it on delete.
+
+Enforced in four places, each independently: the `where` in `app/api/queue/route.ts`, a `409`
+with **no override parameter** in `app/api/gmail/draft/route.ts`, a pre-insert lookup in
+`prisma/import-mangood.ts`, and a banner in `account-detail`. The queue's clause carries an
+`email: null` arm that is load-bearing — SQL `NOT IN` against a NULL column excludes the row, so
+without it every contact with no address vanishes from the queue.
+
+`POST /api/suppressions` is the only writer, and it is a separate route on purpose: `patch()` in
+`account-detail` has no in-flight guard (E6), and routing suppression through it would put the one
+write that must never be lost on the one path that can lose it. It upserts and never overwrites an
+existing `optedOutAt` — the first timestamp is the one that matters.
 
 ### Deliberate v1 gaps
 
