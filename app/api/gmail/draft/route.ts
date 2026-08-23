@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { normalizeEmail } from "@/lib/contacts";
+import { CONSENT_FIRST_JURISDICTIONS } from "@/lib/types";
 import {
   buildFooter,
   encodeSubject,
@@ -72,7 +74,23 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { accountId, to, subject, body } = await request.json();
+  // Guarded, matching POST /api/compose's idiom. Previously unguarded, which meant a
+  // malformed body threw and returned Next's HTML error page — and the client's
+  // res.json() then threw in turn, so the operator saw nothing at all.
+  let payload: {
+    accountId?: string;
+    to?: string;
+    subject?: string;
+    body?: string;
+    acknowledgeJurisdiction?: boolean;
+  };
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
+  }
+
+  const { accountId, to, subject, body } = payload;
   if (!to || !subject || !body) {
     return NextResponse.json(
       { error: "to, subject, and body are required" },
@@ -80,14 +98,81 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // accountId is REQUIRED, where it used to be optional. The old conditional lookup meant
+  // a request that simply omitted it got a draft with no From header, no write-back, and —
+  // under the gates below — no compliance checks at all. That is a bypass, not an edge
+  // case. The only caller always sends it, so this breaks nothing.
+  if (!accountId) {
+    return NextResponse.json(
+      { error: "accountId is required" },
+      { status: 400 }
+    );
+  }
+
   // Loaded before the Gmail call so the campaign's sending identity can go on the
-  // message. Also gives the write-back a validated id.
-  const account = accountId
-    ? await prisma.account.findUnique({
-        where: { id: accountId },
-        include: { project: { select: { fromEmail: true } } },
-      })
-    : null;
+  // message, and so the gates below have something to read. Also gives the write-back a
+  // validated id.
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    select: {
+      id: true,
+      name: true,
+      jurisdiction: true,
+      consentedAt: true,
+      project: { select: { fromEmail: true } },
+    },
+  });
+  if (!account) {
+    return NextResponse.json({ error: "No such contact." }, { status: 404 });
+  }
+
+  // Suppression first, and with no override parameter. A request reaching this branch is
+  // asking the application to contact someone who told us to stop; there is no argument
+  // the caller could pass that makes that acceptable, so there is no argument to pass.
+  // Deliberately asymmetric with the jurisdiction gate below.
+  //
+  // Keyed on the recipient address rather than on the account row, so an opt-out recorded
+  // against this person in ANY project blocks this draft too. Normalized the same way it
+  // was on the way in — a lookup on the raw `to` would miss a suppression stored
+  // lowercase, which is every suppression. And on `to` rather than account.email, because
+  // `to` is what actually goes in the header: gating on anything else leaves a hole.
+  const suppressed = await prisma.suppression.findUnique({
+    where: { email: normalizeEmail(to) ?? "" },
+  });
+  if (suppressed) {
+    return NextResponse.json(
+      {
+        error:
+          `${account.name} opted out on ` +
+          `${suppressed.optedOutAt.toISOString().slice(0, 10)}. No draft was created.`,
+      },
+      { status: 409 }
+    );
+  }
+
+  // Jurisdiction gate. Unlike suppression this is an "are you sure" and not a "no":
+  // consent-first is a rule about unsolicited FIRST contact, and the operator may hold a
+  // basis the database doesn't know about. The acknowledgement is per-request and is never
+  // written to the row — a persisted acknowledgement is a permission, and this deliberately
+  // is not one. Same reasoning as CRM_I_KNOW_THE_API_IS_UNAUTHENTICATED in proxy.ts: make
+  // the override loud, and make it cost something every time.
+  const consentFirst = (CONSENT_FIRST_JURISDICTIONS as readonly string[]).includes(
+    account.jurisdiction ?? ""
+  );
+  if (consentFirst && !account.consentedAt && payload.acknowledgeJurisdiction !== true) {
+    return NextResponse.json(
+      {
+        error:
+          `${account.name} is recorded in ${account.jurisdiction}, where a first ` +
+          `unsolicited email needs consent, and no consent date is on file. Record ` +
+          `consent on the contact, or confirm you have a basis for this send.`,
+        // The discriminator that lets the client tell an overridable 409 from an absolute
+        // one without string-matching the message. Absent on the suppression refusal.
+        requiresAcknowledgement: true,
+      },
+      { status: 409 }
+    );
+  }
 
   // Fail closed, before any Gmail call. A footer that silently omits itself is worse than
   // no footer, because the message looks compliant. 500 rather than 400 is right: the
@@ -106,7 +191,7 @@ export async function POST(request: NextRequest) {
   try {
     const raw = buildRawMessage({
       to,
-      from: account?.project.fromEmail,
+      from: account.project.fromEmail,
       subject,
       body,
       identity,
@@ -128,7 +213,7 @@ export async function POST(request: NextRequest) {
       ? `https://mail.google.com/mail/u/${mailboxPath}/#drafts?compose=${messageId}`
       : undefined;
 
-    if (account && draftLink) {
+    if (draftLink) {
       await prisma.account.update({
         where: { id: account.id },
         data: { draftLink },

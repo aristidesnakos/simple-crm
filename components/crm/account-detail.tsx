@@ -122,32 +122,64 @@ export function AccountDetail({
     }
   }
 
+  // One POST attempt. Returns the parsed body plus the status so the caller can decide
+  // whether to retry with an acknowledgement, rather than recursing blindly.
+  async function postDraft(acknowledgeJurisdiction: boolean) {
+    const res = await fetch("/api/gmail/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: local!.id,
+        to: local!.email,
+        subject,
+        body,
+        ...(acknowledgeJurisdiction ? { acknowledgeJurisdiction: true } : {}),
+      }),
+    });
+    // res.ok BEFORE res.json(). The route can now return a 500 from an unhandled Prisma
+    // error, which is Next's HTML error page — parsing that throws.
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: false as const, error: data.error, requires: data.requiresAcknowledgement };
+    }
+    return { ok: true as const, data: await res.json() };
+  }
+
   async function createDraft() {
     if (!local!.email) {
       toast.error("This account has no email address on file.");
       return;
     }
     setSending(true);
+    // The catch is the point of this shape. Without it an HTML error response makes
+    // res.json() throw, the rejection escapes the click handler, and the operator sees
+    // nothing at all — no toast, no state change, just a button that stopped spinning.
+    // A 409 nobody can see is not a gate. Modelled on composeWithLlm above.
     try {
-      const res = await fetch("/api/gmail/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: local!.id,
-          to: local!.email,
-          subject,
-          body,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? "Couldn't create the draft.");
+      let result = await postDraft(false);
+
+      // The jurisdiction gate is overridable; suppression is not. `requiresAcknowledgement`
+      // is what distinguishes them, so we never string-match the message. The retry is an
+      // explicit second POST rather than a flag held in state, so an acknowledgement given
+      // for this contact cannot leak into an unrelated later send.
+      if (!result.ok && result.requires) {
+        if (!window.confirm(`${result.error}\n\nCreate the draft anyway?`)) {
+          return;
+        }
+        result = await postDraft(true);
+      }
+
+      if (!result.ok) {
+        toast.error(result.error ?? "Couldn't create the draft.");
         return;
       }
+
       toast.success("Draft created in Gmail.");
-      onUpdated({ ...local!, draftLink: data.draftLink });
-      setLocal((l) => (l ? { ...l, draftLink: data.draftLink } : l));
+      onUpdated({ ...local!, draftLink: result.data.draftLink });
+      setLocal((l) => (l ? { ...l, draftLink: result.data.draftLink } : l));
       setComposeOpen(false);
+    } catch {
+      toast.error("Couldn't reach the drafting service.");
     } finally {
       setSending(false);
     }
