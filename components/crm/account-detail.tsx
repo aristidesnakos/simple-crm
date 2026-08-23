@@ -43,11 +43,35 @@ export function AccountDetail({
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [optOutOpen, setOptOutOpen] = useState(false);
+  // The footer the route will append, fetched once. Not derived from anything on the
+  // client because the values live in the server's environment.
+  const [footer, setFooter] = useState<{
+    footer: string | null;
+    problem: string | null;
+  } | null>(null);
 
   useEffect(() => {
     setLocal(account);
     setComposeOpen(false);
   }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetched once on mount rather than per contact: the footer is the same for every
+  // message this deployment sends, so re-fetching it per selection would be pure noise.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/outreach/footer")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setFooter(d);
+      })
+      .catch(() => {
+        // A preview that fails to load is not worth a toast — the draft button still
+        // reports the real error, and the composer works without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Keyed on the project as well as the account: switching project without
   // switching account used to leave the previous project's template in the
@@ -422,6 +446,25 @@ export function AccountDetail({
                 </Button>
                 </div>
               </div>
+
+              {/* REQ-06b. Read-only and visibly outside the textarea: pasting it in would
+                  let the operator edit it, and the route would then append a second copy.
+                  This is the only place they see what actually goes out. */}
+              {footer?.footer && (
+                <div className="rounded-md border border-dashed bg-muted/40 p-2">
+                  <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                    Appended automatically — not editable
+                  </p>
+                  <pre className="whitespace-pre-wrap font-sans text-xs text-muted-foreground">
+                    {footer.footer}
+                  </pre>
+                </div>
+              )}
+              {footer?.problem && (
+                <p className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs">
+                  {footer.problem}
+                </p>
+              )}
             </div>
           )}
         </div>
