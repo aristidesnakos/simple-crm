@@ -15,10 +15,29 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const now = new Date();
 
+  // Suppression lives in its own table keyed on the normalized address, so it cannot be a
+  // column predicate. Read the set first, then exclude it below. At this scale that is one
+  // small indexed scan — the same "costs nothing at tens of rows" reasoning as the JS sort.
+  const suppressed = (
+    await prisma.suppression.findMany({ select: { email: true } })
+  ).map((s) => s.email);
+
   const rows = await prisma.account.findMany({
     where: {
       status: { notIn: [...QUEUE_EXCLUDED_STATUSES] },
-      OR: [{ nextActionDue: null }, { nextActionDue: { lte: now } }],
+      AND: [
+        { OR: [{ nextActionDue: null }, { nextActionDue: { lte: now } }] },
+        // Suppression is absolute and independent of the status vocabulary: a contact who
+        // opted out is out of the queue whatever their stage says — including `Prospect`,
+        // which is not in QUEUE_EXCLUDED_STATUSES and never will be — and out of it in
+        // EVERY project they appear in, because the match is on the address, not the row.
+        //
+        // The `email: null` arm is load-bearing, not defensive. In SQL, `NOT IN` against a
+        // NULL column excludes the row, so a bare `email: { notIn: … }` would silently drop
+        // every contact with no address — 11 of 34 today, and exactly the rows the queue is
+        // most likely to hold. Verified against real data, not assumed.
+        { OR: [{ email: null }, { email: { notIn: suppressed } }] },
+      ],
     },
     include: { project: { select: { id: true, name: true } } },
   });

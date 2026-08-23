@@ -13,7 +13,32 @@ export async function GET(request: NextRequest) {
     where: projectId ? { projectId } : undefined,
     orderBy: { createdAt: "asc" },
   });
-  return NextResponse.json(accounts);
+
+  // `optedOutAt` is DERIVED, not a column. Suppression lives in its own table keyed on the
+  // normalized address so it can span campaigns and outlive the row, which means it cannot
+  // come back on the account. Resolved here rather than client-side: one query for the
+  // page, and no component has to know the table exists.
+  //
+  // The timestamp rather than a boolean, because the detail banner says *when* and a
+  // boolean throws that away.
+  const emails = accounts
+    .map((a) => a.email)
+    .filter((e): e is string => Boolean(e));
+  const suppressedAt = new Map(
+    (
+      await prisma.suppression.findMany({
+        where: { email: { in: emails } },
+        select: { email: true, optedOutAt: true },
+      })
+    ).map((s) => [s.email, s.optedOutAt])
+  );
+
+  return NextResponse.json(
+    accounts.map((a) => ({
+      ...a,
+      optedOutAt: (a.email && suppressedAt.get(a.email)) ?? null,
+    }))
+  );
 }
 
 export async function POST(request: NextRequest) {
