@@ -16,19 +16,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Mail, ExternalLink, Sparkles, Wand2 } from "lucide-react";
+import { Ban, Mail, ExternalLink, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+import { OptOutDialog } from "@/components/crm/opt-out-dialog";
 
 export function AccountDetail({
   account,
   project,
   projects,
   onUpdated,
+  onSuppressed,
 }: {
   account: Account | null;
   project: Project | null;
   projects: Project[];
   onUpdated: (account: Account) => void;
+  // Separate from onUpdated because a suppression can touch rows this pane never had —
+  // the same person in another campaign. CrmApp splices them all.
+  onSuppressed: (optedOutAt: string, affectedIds: string[]) => void;
 }) {
   const { data: session } = useSession();
   const [local, setLocal] = useState<Account | null>(account);
@@ -37,6 +42,7 @@ export function AccountDetail({
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
+  const [optOutOpen, setOptOutOpen] = useState(false);
 
   useEffect(() => {
     setLocal(account);
@@ -60,6 +66,13 @@ export function AccountDetail({
       </div>
     );
   }
+
+  // DERIVED, never stored. A useEffect syncing this into state would take the
+  // react-hooks/set-state-in-effect count from 3 to 4, and the effects above key on
+  // account?.id with exhaustive-deps disabled — so a suppression, which doesn't change
+  // the id, would not re-run them anyway. patch() and the opt-out handler both update
+  // `local` optimistically, so deriving is both correct and cheaper.
+  const suppressed = Boolean(local.optedOutAt);
 
   async function patch(fields: Partial<Account>) {
     const before = local!;
@@ -196,6 +209,18 @@ export function AccountDetail({
             onBlur={() => patch({ name: local.name })}
           />
         </div>
+
+        {suppressed && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+            <p className="text-sm font-medium">
+              Opted out on {local.optedOutAt!.slice(0, 10)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              This applies to every campaign they appear in, and survives deleting
+              the contact. Drafting is refused server-side, not just hidden here.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-1.5">
@@ -343,7 +368,14 @@ export function AccountDetail({
             </p>
           )}
 
-          {session && !composeOpen && (
+          {suppressed && (
+            <p className="text-xs text-muted-foreground">
+              Drafting is disabled for a contact who has opted out. This is an
+              affordance, not the control — the draft route refuses regardless.
+            </p>
+          )}
+
+          {session && !suppressed && !composeOpen && (
             <Button
               variant="outline"
               size="sm"
@@ -354,7 +386,7 @@ export function AccountDetail({
             </Button>
           )}
 
-          {session && composeOpen && (
+          {session && !suppressed && composeOpen && (
             <div className="space-y-2 rounded-lg border p-3">
               <Input
                 value={subject}
@@ -393,6 +425,31 @@ export function AccountDetail({
             </div>
           )}
         </div>
+
+        {!suppressed && local.email && (
+          <>
+            <Separator />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => setOptOutOpen(true)}
+            >
+              <Ban className="h-3.5 w-3.5" />
+              Record an opt-out
+            </Button>
+            <OptOutDialog
+              account={local}
+              open={optOutOpen}
+              onOpenChange={setOptOutOpen}
+              onSuppressed={(optedOutAt, affectedIds) => {
+                setLocal((l) => (l ? { ...l, optedOutAt } : l));
+                setComposeOpen(false);
+                onSuppressed(optedOutAt, affectedIds);
+              }}
+            />
+          </>
+        )}
       </div>
     </div>
   );

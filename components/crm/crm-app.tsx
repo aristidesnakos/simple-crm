@@ -123,6 +123,16 @@ export function CrmApp() {
   const selectedAccount =
     accounts.find((a) => a.id === selectedAccountId) ?? null;
 
+  // A suppression is keyed on the email address, so it can cover rows in projects other
+  // than the open one. Only the loaded ones are in `accounts` — the rest pick it up on
+  // their next load, since GET /api/accounts derives the flag server-side.
+  function handleAccountSuppressed(optedOutAt: string, affectedIds: string[]) {
+    const ids = new Set(affectedIds);
+    setAccounts((prev) =>
+      prev.map((a) => (ids.has(a.id) ? { ...a, optedOutAt } : a))
+    );
+  }
+
   function handleAccountUpdated(updated: Account) {
     const previous = accounts.find((a) => a.id === updated.id);
     const movedProject = !!previous && previous.projectId !== updated.projectId;
@@ -247,6 +257,7 @@ export function CrmApp() {
                 project={selectedProject}
                 projects={projects}
                 onUpdated={handleAccountUpdated}
+                onSuppressed={handleAccountSuppressed}
               />
             </DevFeedback>
           </ResizablePanel>
