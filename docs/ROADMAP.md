@@ -134,6 +134,9 @@ One line each. Nothing here is scheduled.
 | `POST /api/gmail/send` | When drafting-then-sending-by-hand actually becomes the bottleneck. |
 | Guard `DELETE /api/projects/[id]` | Before anyone but the author can reach it. |
 | Status → Gmail label mirroring, reply-rate trend | After Phase 1 is trusted. |
+| Contact-scoped Gmail read + metadata index (the communications surface). Note `gmail.metadata` does **not** permit the `q` search parameter, so this needs `gmail.readonly` — a restricted scope, affordable only because 0.d's Internal consent screen exempts verification and CASA. `D20` (docs/requirements/04 §5.2) must be settled first: a read scope puts inbound bodies in the same process that builds the compose brief. | Phase 0 0.d landed **and** D20 recorded. |
+| `gmail.settings.basic` on the same re-consent, so `users.settings.sendAs.list` can preflight `Project.fromEmail`. Kills **E5** — the app currently cannot tell an unverified alias from a Gmail outage. | Whenever the scope is next widened; do not re-consent twice. |
+| Sending-identity column on `Interaction`. Per-TLD statistics can't attribute a message without it. | The day the metadata index is built. |
 | zod, 500→400, dark mode, Prisma v7 | Never, absent a forcing function. See archive §7. |
 
 ## 6. Open questions
