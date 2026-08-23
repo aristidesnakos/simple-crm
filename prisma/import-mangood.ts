@@ -92,7 +92,7 @@ async function importProject(project: Data["projects"][number]) {
   });
   if (existing) {
     console.log(`· ${project.name} — already exists, skipping`);
-    return;
+    return null;
   }
 
   const created = await prisma.project.create({
@@ -108,12 +108,46 @@ async function importProject(project: Data["projects"][number]) {
     },
   });
 
+  let imported = 0;
+  const skipped: string[] = [];
+
   for (const c of project.contacts) {
+    const email = normalizeEmail(c.email);
+
+    // Suppression check, per contact, BEFORE the insert. This script bypasses the API
+    // entirely (docs/ROADMAP.md E8), so none of the application-layer controls apply here
+    // — which is exactly why the one control with legal consequence has to be repeated.
+    //
+    // A sheet is a snapshot. Re-importing one that still lists somebody who has opted out
+    // since it was exported is the normal way a suppressed person gets resurrected, and
+    // the row would come back looking clean.
+    //
+    // Keyed on the address, so this holds even when the opt-out was recorded while working
+    // a different campaign — or when the contact row it was recorded against has since
+    // been deleted. Suppression outlives both.
+    if (email) {
+      const suppressed = await prisma.suppression.findUnique({
+        where: { email },
+        select: { optedOutAt: true },
+      });
+      if (suppressed) {
+        // Loud and per-address, deliberately not a silent filter: a skipped row is
+        // information the operator needs, because it means the sheet is stale.
+        console.log(
+          `· skipping ${email} — opted out ${suppressed.optedOutAt
+            .toISOString()
+            .slice(0, 10)}`
+        );
+        skipped.push(email);
+        continue;
+      }
+    }
+
     await prisma.account.create({
       data: {
         projectId: created.id,
         name: c.name,
-        email: normalizeEmail(c.email),
+        email,
         kind: project.kind,
         status: c.status,
         labels: c.labels ?? null,
@@ -124,15 +158,36 @@ async function importProject(project: Data["projects"][number]) {
         ...(c.createdAt ? { createdAt: new Date(c.createdAt) } : {}),
       },
     });
+    imported += 1;
   }
 
-  console.log(`✓ ${project.name} — ${project.contacts.length} contacts`);
+  console.log(`✓ ${project.name} — ${imported} contacts`);
+  return { imported, skipped };
 }
 
 async function main() {
   const data = readData();
+  let imported = 0;
+  const skipped: string[] = [];
+
   for (const project of data.projects) {
-    await importProject(project);
+    const result = await importProject(project);
+    if (result) {
+      imported += result.imported;
+      skipped.push(...result.skipped);
+    }
+  }
+
+  // Printed even when zero, so "nothing was skipped" is a statement rather than an
+  // absence. A skip that scrolls past unread is a skip that did not happen, as far as
+  // the operator's understanding goes.
+  console.log(`\n${imported} imported, ${skipped.length} skipped as opted out.`);
+  if (skipped.length) {
+    console.log(
+      "These addresses are on the suppression list and were NOT re-added:\n" +
+        skipped.map((e) => `  ${e}`).join("\n") +
+        "\nThe source sheet is stale. Remove them from it before the next export."
+    );
   }
 }
 

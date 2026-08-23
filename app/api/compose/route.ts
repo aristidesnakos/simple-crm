@@ -37,12 +37,17 @@ Rules:
 - One ask, at the end, phrased so that "no" is easy.
 - No "I hope this email finds you well", no "I wanted to reach out", no "circling back",
   no "synergy", no "excited to connect".
-- Sign off with the sender's first name alone. Do not invent a title or company footer.
+- Sign off with the sender's first name alone. Do not write a signature block, postal
+  address, or opt-out line — the application appends the required footer after you, and a
+  second one reads as spam.
 - Never invent facts about the recipient. Everything specific must come from the notes.
   If the notes are thin, write a shorter email rather than a padded one.
 - The recipient may not remember signing up. If a signup date is given, say when and
   where plainly, in the first sentence.
-- Never state or imply that this message was written by AI.
+- Write in the sender's own voice, the way they would type it themselves.
+- If "How we obtained this contact" is given below and it is not a direct signup, say
+  plainly where their details came from within the first two sentences. "I found you
+  through the FoodTech partner list" is the shape. Do not dress it up.
 
 Reply with a JSON object and nothing else, shaped exactly:
 {"subject": string, "body": string, "rationale": string}
@@ -91,6 +96,14 @@ export async function POST(request: NextRequest) {
 
   // Everything the model is allowed to use. Assembled explicitly rather than dumping
   // the row so that adding a column doesn't silently start leaking into prompts.
+  //
+  // RS-01 / D20 BOUNDARY: every field here is CRM-authored — typed by the operator or
+  // imported from our own sheets. No Gmail-derived content may be added to this array.
+  // Gmail data is obtained under a restricted scope whose Limited Use terms bar onward
+  // transfer to a third party, and this array is transferred to OpenRouter and onward to
+  // a model provider. If the message store lands and you are tempted to include a thread
+  // summary here, that is the decision D20 exists to stop. See
+  // docs/requirements/04-COMPLIANCE-REGISTER CTL-09 and §5.2.
   const brief = [
     `Campaign: ${account.project.name}`,
     account.project.description && `Campaign purpose: ${account.project.description}`,
@@ -106,6 +119,11 @@ export async function POST(request: NextRequest) {
       ? `Last contacted: ${sinceContact} days ago`
       : "Never contacted before — this is the first message.",
     account.nextAction && `Planned next action: ${account.nextAction}`,
+    // Drives the source-disclosure sentence the system prompt requires for anything that
+    // is not a direct signup — GDPR Art. 14(2)(f), which asks us to volunteer where we
+    // got their details at the latest at first communication.
+    account.sourceType && `How we obtained this contact: ${account.sourceType}`,
+    account.sourceDetail && `Source detail: ${account.sourceDetail}`,
     "",
     account.notes ? `Research notes:\n${account.notes}` : "No research notes on file.",
   ]
