@@ -296,7 +296,17 @@ export const JURISDICTIONS = [
 // The subset where a first unsolicited contact needs consent rather than an opt-out.
 // This constant is the whole of REQ-10's gate — the draft route reads it and nothing
 // else. Widening it is a product decision, not a code cleanup.
-export const CONSENT_FIRST_JURISDICTIONS = ["EU", "UK", "CA", "JP"] as const;
+//
+// UNKNOWN is in here deliberately. Doc 03 risk R3 and VER-10b both say an ambiguous
+// contact is recorded as UNKNOWN and treated as consent-first so it fails safe; leaving
+// it out would make that promise false, and an unreviewed row would sail through the gate.
+export const CONSENT_FIRST_JURISDICTIONS = [
+  "EU",
+  "UK",
+  "CA",
+  "JP",
+  "UNKNOWN",
+] as const;
 ```
 
 Extend the hand-mirrored `Account` type in the same file and add the new `Suppression` type. Dates
@@ -1120,6 +1130,12 @@ control and it is correct on next fetch. Do not build cross-page invalidation fo
 be the first store in a codebase that deliberately has none.
 
 ### 12.5 Ordering hazard between the migration and the routes
+
+**Restart `next dev` after the migration.** A dev server started before `CRM-101` holds the
+pre-migration Prisma Client in memory, and `prisma generate` cannot reach into a running process.
+Every write carrying a new column then fails with `Unknown argument \`sourceType\`` — a 500 that
+looks like a bug in the route you just wrote and is not. Turbopack's hot reload does not help:
+the stale artifact is the generated client, not your source. Kill the server and start it again.
 
 The four edits in §3 must land in one commit. A deployed schema whose columns no route reads is
 harmless; a route reading `prisma.suppression` against a schema without the table is a runtime

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { normalizeEmail } from "@/lib/contacts";
+import { normalizeEmail, validateComplianceFields } from "@/lib/contacts";
 
 export async function PATCH(
   request: NextRequest,
@@ -8,6 +8,14 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const body = await request.json();
+
+  // Same narrow validation as the POST. Runs before anything is written, so a bad
+  // jurisdiction never reaches the row that the draft route's consent gate reads.
+  const invalid = validateComplianceFields(body);
+  if (invalid) {
+    return NextResponse.json({ error: invalid }, { status: 400 });
+  }
+
   const data: Record<string, unknown> = {};
   for (const key of [
     "name",
@@ -19,6 +27,11 @@ export async function PATCH(
     "draftLink",
     "notesLink",
     "projectId",
+    // RS-01 compliance fields, string-valued. Suppression is absent on purpose: it is
+    // not a column on this row, and POST /api/suppressions is its only writer.
+    "sourceType",
+    "sourceDetail",
+    "jurisdiction",
   ] as const) {
     if (body[key] !== undefined) data[key] = body[key];
   }
@@ -27,7 +40,9 @@ export async function PATCH(
   if (body.email !== undefined) {
     data.email = normalizeEmail(body.email);
   }
-  for (const key of ["lastContact", "nextActionDue"] as const) {
+  // consentedAt belongs HERE and not in the loop above: Prisma will not accept a JSON
+  // string for a DateTime field, and the failure is silent enough to reach production.
+  for (const key of ["lastContact", "nextActionDue", "consentedAt"] as const) {
     if (body[key] !== undefined) {
       data[key] = body[key] ? new Date(body[key]) : null;
     }

@@ -22,6 +22,24 @@ export type Account = {
   notes: string | null;
   draftLink: string | null;
   notesLink: string | null;
+  sourceType: string | null;
+  sourceDetail: string | null;
+  consentedAt: string | null;
+  jurisdiction: string | null;
+  // Derived, NOT a column. Computed by GET /api/accounts from the Suppression table,
+  // which is keyed on the address and spans projects. Never send this in a PATCH —
+  // POST /api/suppressions is the only writer.
+  optedOutAt: string | null;
+};
+
+// Hand-mirrored from prisma/schema.prisma like StatusEvent and Interaction below. Keyed
+// on the normalized email rather than on an account id, because suppression attaches to
+// a person and outlives any one campaign row — see docs/requirements/02-TRD §2.0.
+export type Suppression = {
+  email: string;
+  optedOutAt: string;
+  source: string | null;
+  note: string | null;
 };
 
 // A queue row is an Account plus the project it belongs to. /api/queue reads across
@@ -99,6 +117,58 @@ export const QUEUE_EXCLUDED_STATUSES = [
   "Closed Won",
   "Closed Lost",
   "Rejected",
+] as const;
+
+// --- RS-01 compliance vocabularies -------------------------------------------------
+// Picker lists, not server-side guarantees — every one of these is a plain String column
+// on SQLite and nothing in the database validates it, exactly like STATUS_OPTIONS_BY_KIND
+// above. The difference is that these four DO get checked in the route, because a bad
+// value has a legal consequence rather than a cosmetic one: see validateComplianceFields
+// in lib/contacts.ts and docs/requirements/02-TRD §11.
+
+// How a contact entered the system. Drives the source-disclosure sentence the composer is
+// required to write for anything that is not a direct signup (REQ-17).
+export const SOURCE_TYPES = [
+  "waitlist_form",
+  "partner_sheet",
+  "referral",
+  "manual",
+  "research",
+] as const;
+
+// Sources that are a direct, affirmative action by the contact themselves. Anything NOT
+// in this list triggers the GDPR Art. 14 source-disclosure requirement in the compose
+// system prompt.
+export const DIRECT_SOURCE_TYPES = ["waitlist_form"] as const;
+
+// How an opt-out reached us. `reply` is the expected case — the footer asks people to
+// reply with the word "stop", so keep the two aligned if either changes.
+export const OPT_OUT_SOURCES = ["reply", "verbal", "form", "manual"] as const;
+
+// Coarse, hand-set. We record the flag and a human handles the exceptions; we deliberately
+// do not encode the statutes (docs/requirements/01-PRD N1).
+export const JURISDICTIONS = [
+  "US",
+  "EU",
+  "UK",
+  "CA",
+  "JP",
+  "OTHER",
+  "UNKNOWN",
+] as const;
+
+// The subset where a first unsolicited contact needs consent rather than an opt-out. This
+// constant is the whole of REQ-10's gate — app/api/gmail/draft/route.ts reads it and
+// nothing else. Widening it is a product decision, not a code cleanup.
+//
+// UNKNOWN is in here on purpose: an unreviewed contact fails safe as consent-first rather
+// than falling through the gate.
+export const CONSENT_FIRST_JURISDICTIONS = [
+  "EU",
+  "UK",
+  "CA",
+  "JP",
+  "UNKNOWN",
 ] as const;
 
 // Keyed loosely rather than to the option lists because status is unvalidated free
