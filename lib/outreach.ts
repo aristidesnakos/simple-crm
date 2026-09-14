@@ -9,10 +9,13 @@
 // CAN-SPAM § 7704(a)(5) and CASL s. 6(2)(b), among others.
 //
 // Configuration and not a column, deliberately. The footer names the LEGAL ENTITY, which
-// sits above a campaign: `Mangood — Waitlist` and `Mangood — Partners` are two projects
-// with one sender between them, so a per-project column would store the same value twice
-// with nowhere single to change it. The tier that would own it correctly is the Product
-// tier that docs/ROADMAP.md D16 deliberately does not build. See
+// sits above the whole app rather than inside it: `Mangood` and `MichiKanji — Shodo
+// Schools` are two projects with one sender between them, so a per-project column would
+// store the same value twice with nowhere single to change it.
+//
+// Note this survived docs/ROADMAP.md D22 collapsing Project from campaign to business —
+// it makes the argument stronger, not weaker. A business is still not a legal entity: one
+// company sends for several of its own products. See
 // docs/requirements/02-TRD-technical-spec.md §6.1, and doc 01 §10 for the trigger to
 // revisit — a second legal entity starting to send.
 export type SenderIdentity = {
@@ -86,7 +89,6 @@ export function buildFooter(identity: SenderIdentity): string {
 // Applied only when needed, so a plain ASCII subject stays legible in the raw message —
 // both for humans reading it and for the VER-06 inspection procedure.
 export function encodeSubject(subject: string): string {
-  // eslint-disable-next-line no-control-regex
   if (!/[^\x00-\x7F]/.test(subject)) return subject;
   return `=?utf-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
 }

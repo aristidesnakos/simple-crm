@@ -95,6 +95,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 email: token.email as string,
                 accessToken: refreshed.accessToken,
                 expiresAt: refreshed.expiresAt,
+                // The refresh token we just USED, not one returned by the exchange —
+                // Google only issues a refresh token on first consent and omits it on
+                // every refresh afterwards. Omitting it here is how the stored row ended
+                // up with refreshToken = NULL while the JWT still held a good one, which
+                // made getFreshGoogleAccessToken unable to ever succeed. saveGoogleCredential
+                // only overwrites when a value is supplied, so passing it is always safe.
+                refreshToken: token.refreshToken as string,
                 scope: refreshed.scope,
               });
             } catch (err) {

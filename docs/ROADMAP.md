@@ -23,7 +23,8 @@ its own Q3 and specified the stats engine anyway.
 
 ## 2. Decisions added this revision
 
-D1–D11 stand in the archive unless listed here.
+D1–D11 stand in the archive unless listed here. D21–D22 were added **2026-09-14**,
+after a review of the email architecture.
 
 | # | Decision | Rationale |
 | --- | --- | --- |
@@ -31,10 +32,12 @@ D1–D11 stand in the archive unless listed here.
 | **D13** | **Reverses D4.** Phase 0 (Workspace + DNS) is parallel and owner-owned, not the critical path. | D4 assumed cold outreach from new domains. The list is warm opt-in inbound, which also closes archive-Q4. Deliverability urgency (archive §2.6) drops with it. |
 | **D14** | **Cut the `Message` index, the sync route, and `/api/stats`** (archive §2.3, tasks 1.a/1.b/1.e/1.g/1.j). | They exist to compute reply rate. No consumer, no build. This also closes Q1 by removing the thing a mailbox migration would orphan. |
 | **D15** | **Two pipelines, one model.** `Account.kind` = `customer` \| `collaborator`, with a status vocabulary per kind. | One `STATUS_OPTIONS` list is sales vocabulary. "Closed Won" is meaningless for a waitlist signup and "Rejected" is wrong. Free-text column like every other status here. |
-| **D16** | Project = **campaign, named by product** (`Mangood — Waitlist`, `Mangood — Partners`). No Product tier. | Trigger to revisit: ~3 products × 3 campaigns making the sidebar unscannable. |
+| **D16** | Project = **campaign, named by product** (`Mangood — Waitlist`, `Mangood — Partners`). No Product tier. | Trigger to revisit: ~3 products × 3 campaigns making the sidebar unscannable. **Reversed 2026-09-14 by D22** — the trigger fired at 2 campaigns × 1 product, and for a different reason than predicted: the sending identity, not scannability. |
 | **D17** | **Keep building simple-crm.** Adopt-vs-build (EspoCRM) is deferred, not decided. | Evaluating a CRM for two days in order to send nine emails is the same disease as revision 3. Revisit at ~50 contacts across 3+ campaigns with multiple live sending identities. |
 | **D19** | **OpenRouter for the LLM, not a direct provider SDK.** | Model portability is the point: one gateway, one key, and the model is a config string. Matches `~/Documents/llanai` (`lib/gpt-server.ts`), so both projects share one account and one mental model. Structured output uses the portable `json_object` mode with zod validating the parse — strict `json_schema` is enforced by only some models, which would re-couple us to a provider. |
 | **D18** | **No owner column, no `Account`→`Contact` rename yet**, despite "tool now, product later". | At one owner the backfill is a one-line `UPDATE`; the expensive part is ownership filtering across every route, and that costs the same whenever it's paid. Rename trigger: the day a Prisma adapter is added, bundled with it. |
+| **D21** | **Reply visibility, not reply indexing** — ship a per-contact "Open conversation in Gmail" link in `account-detail`, not a `gmail.readonly` scope, a sync route, an `Interaction` index and reply stats. **D14 is therefore not reversed.** | The index was scoped and rejected on cost/risk: `gmail.readonly` is a Google **restricted** scope, so without 0.d (OAuth client in the tenant, **Internal** consent screen) it triggers a CASA security review — weeks, uncertain outcome — and it still needs a sync route, a local metadata index, a timeline UI, and careful handling of the D20 CRM/Gmail boundary (Gmail-derived content must never enter the `/api/compose` brief). What ships instead is a plain client-side URL, `https://mail.google.com/mail/u/<url-encoded mailbox address>/#search/<url-encoded query>` with the query `from:<contact email> OR to:<contact email>`: **zero new OAuth scopes, zero sync, zero stored mail data, no re-consent**, one click from a contact to the whole thread history in Gmail — which is already where mail is read and sent (D1/D11, and answer 2 of the 2026-09-14 clarification). Accepted cost, recorded so it is not rediscovered: **no reply counts, no "who replied" column in `/queue`, no reply-rate or response-time statistics, and no way to see an unanswered thread without opening Gmail.** The statistics goal is **deferred, not abandoned**. Trigger to revisit: the day a reply rate or a response time actually has to be reported, or the day the Gmail round-trip demonstrably costs more than the index would — which is a judgement to make after a batch has actually been sent, not before. |
+| **D22** | **Project = business, not campaign. Reverses D16.** `Mangood — Waitlist` (9 accounts) and `Mangood — Partners` (17) merge into one project, `Mangood` (26); `Mangood — Partners` is deleted once empty. | One row per business in the sidebar — click a business and you are in that identity; two rows for one business is the opposite of that. Each business has its own sending domain (2026-09-14 answer 1), and a sending identity belongs to a **business**, not a campaign: with two Mangood projects the same `fromEmail` has to be typed twice and drifts. `Account.kind` (D15) already carries the pipeline split, so collapsing the projects loses nothing — and it is the cheaper of the two options considered; the other was a Business tier above Project. Known rough edge: both projects' `approach` briefs are substantive and different (waitlist re-engagement vs. founder-to-founder partnership outreach), so they are **concatenated under per-pipeline headings** rather than one being discarded — `account-detail` renders `project.approach` read-only beside the composer and the operator needs whichever matches the contact's `kind`. One field now serves two pipelines; a per-kind brief is the obvious refinement if it grates. |
 
 ## 3. Phase 0 — mail infrastructure (owner, parallel, 48h timebox)
 
@@ -50,9 +53,15 @@ a median of 103 days; that cost is real and the domain's is not.
       send — 6 of 9 recipients are Gmail. Verify with mail-tester.com.
 - [ ] **0.d** Move the OAuth client into the tenant, consent screen **Internal** (exempt
       from verification and from the 7-day refresh-token expiry). Allowlist the client ID
-      under Admin → API controls if the tenant requires it.
+      under Admin → API controls if the tenant requires it. **This is now the gate for any
+      future reply indexing** (D21), not a convenience: an Internal consent screen is the
+      only thing that makes a restricted scope such as `gmail.readonly` cheap later.
 - [ ] **0.e** Answer archive-Q1 **fresh, not migrate** — recommended, and now cheap either
       way since D14 removed the message index that a migration would have orphaned.
+
+**0.b + 0.c are what let E5's mitigation be lifted.** Until a `mangood.app` `sendAs` alias
+actually verifies, `Project.fromEmail` stays null on the merged `Mangood` project (§7, E5).
+Check Q5 before touching DNS.
 
 ## 4. Phase 1 — this week (code)
 
@@ -126,7 +135,7 @@ One line each. Nothing here is scheduled.
 
 | Item | Trigger to unpark |
 | --- | --- |
-| Reply rate, `Message` index, `/api/sync`, `/api/stats` | ~100 contacts emailed per slice. Not this year at current volume. |
+| Reply rate, `Message` index, `/api/sync`, `/api/stats` | ~100 contacts emailed per slice. Not this year at current volume. D21 re-confirms the cut and substitutes a Gmail deep link. |
 | Adopt-vs-build (EspoCRM eval) | ~50 contacts, 3+ campaigns, multiple live sending identities (D17). |
 | Product tier above Project | ~3 products × 3 campaigns (D16). |
 | `Account` → `Contact` rename | The day a Prisma adapter is added (D18). |
@@ -134,7 +143,7 @@ One line each. Nothing here is scheduled.
 | `POST /api/gmail/send` | When drafting-then-sending-by-hand actually becomes the bottleneck. |
 | Guard `DELETE /api/projects/[id]` | Before anyone but the author can reach it. |
 | Status → Gmail label mirroring, reply-rate trend | After Phase 1 is trusted. |
-| Contact-scoped Gmail read + metadata index (the communications surface). Note `gmail.metadata` does **not** permit the `q` search parameter, so this needs `gmail.readonly` — a restricted scope, affordable only because 0.d's Internal consent screen exempts verification and CASA. `D20` (docs/requirements/04 §5.2) must be settled first: a read scope puts inbound bodies in the same process that builds the compose brief. | Phase 0 0.d landed **and** D20 recorded. |
+| Contact-scoped Gmail read + metadata index (the communications surface). Note `gmail.metadata` does **not** permit the `q` search parameter, so this needs `gmail.readonly` — a restricted scope, affordable only because 0.d's Internal consent screen exempts verification and CASA. `D20` (docs/requirements/04 §5.2) must be settled first: a read scope puts inbound bodies in the same process that builds the compose brief. | Phase 0 0.d landed, D20 recorded, **and** D21's revisit trigger fired — a reply rate that has to be reported, or a Gmail round-trip that costs more than the index. |
 | `gmail.settings.basic` on the same re-consent, so `users.settings.sendAs.list` can preflight `Project.fromEmail`. Kills **E5** — the app currently cannot tell an unverified alias from a Gmail outage. | Whenever the scope is next widened; do not re-consent twice. |
 | Sending-identity column on `Interaction`. Per-TLD statistics can't attribute a message without it. | The day the metadata index is built. |
 | zod, 500→400, dark mode, Prisma v7 | Never, absent a forcing function. See archive §7. |
@@ -147,7 +156,8 @@ Archive Q1 (answer: fresh), Q3, Q4 (warm), Q7 are closed or void under D12/D13/D
 | --- | --- | --- |
 | Q2 | Which domain is the Workspace primary? Lock-in. | Task 0.a |
 | Q3 | Archive Q5 — why four domains rather than one? Four sender reputations divide an already-small n. | Nothing this week; revisit before domains 2–4 send. |
-| Q4 | Archive Q6 — do replies come from someone other than the person emailed? | Nothing now (D14 cut the index that cared). |
+| Q4 | Archive Q6 — do replies come from someone other than the person emailed? | Nothing now (D14 stands under D21; there is no index that cares). |
+| Q5 | Is **Resend inbound configured on `mangood.app`**? Moving MX to Google for the alias domain would break it if so. | Tasks 0.b/0.c — must be checked **before any DNS change**. |
 
 ---
 
@@ -158,12 +168,15 @@ scheduled: each is deferred to a **stated trigger**, so that "later" is a condit
 not a mood. Fixed on the day they were found: the two create dialogs swallowing every
 server error, and `POST /api/projects` returning a body-less 500.
 
+**Updated 2026-09-14:** E3 and E4 are each half fixed — the rows say which half. E5's
+trigger has fired; it is mitigated, not fixed.
+
 | # | Defect | Trigger to fix |
 | --- | --- | --- |
 | E1 | Every `/api` route except NextAuth's is unauthenticated; `DELETE /api/projects/[id]` cascade-deletes silently. | **Any** non-localhost host. `proxy.ts` now fails closed on this, so the trigger enforces itself. Real per-user auth is still unbuilt. |
-| E3 | `lib/auth.ts` returns a stale expired token when no `refreshToken` is stored, with no `token.error`. `session.error` is read by nothing. | **Latent, not imminent** — `prompt=consent` + `access_type=offline` force a refresh token on every sign-in, so the branch is unreachable after a fresh consent. Trigger: a JWT that outlives its refresh token. The adjacent real risks are no clock-skew buffer (a request in the last second of the hour 502s) and `auth()` in a route handler being unable to persist a refreshed token to the cookie, so every call past the hour mark re-refreshes. |
-| E4 | The conditional `draftLink` write-back returns 200 even when it skips, so the client toasts success and blanks a good link in memory. | Only if Gmail omits the nested `message.id`. Note the id choice itself is **correct** — `#drafts?compose=<message id>` is what the Gmail UI resolves; `draft.data.id` would be a dead link. |
-| E5 | `Project.fromEmail` is set as `From:` with no `sendAs` verification; every Gmail error returns one opaque string. `gmail.compose` cannot enumerate aliases, so the app can't preflight without a second sensitive scope. | The day `ari@mangood.app` is set on a project. Now load-bearing: sending identity is per project by requirement, and `mangood.app`/`michikanji` are Resend domains, not Workspace ones — each needs inbound forwarding to receive Gmail's confirmation code before `sendAs` will verify. |
+| E3 | **Partially fixed 2026-09-14.** The refresh branch of `lib/auth.ts` called `saveGoogleCredential` **without** `refreshToken`, so the persisted `GoogleCredential` row ended up with a null refresh token and `getFreshGoogleAccessToken` (`lib/google-credential.ts`) could never succeed — fixed; the refresh token is now passed through. The original stale-token path is also closed (`token.error` is set when no refresh token is stored) and there **is** a 5-minute clock-skew buffer, so the old "last second of the hour 502s" note no longer applies. What still stands: `auth()` inside a route handler cannot persist a refreshed token back to the JWT cookie, so every call past the hour mark re-refreshes. | **Latent, not imminent** — `prompt=consent` + `access_type=offline` force a refresh token on every sign-in. Trigger for the remainder: a refresh cost that shows up in draft latency, or the first server-side path with no browser request behind it (which is what `GoogleCredential` exists for). |
+| E4 | **Client half fixed 2026-09-14** — `account-detail.tsx` now overwrites `draftLink` only when the response value is truthy, so a response that omits the nested `message.id` no longer blanks a good link in memory. **Server half unchanged and still standing:** the route returns 200 even when it skips the write-back, so the client still toasts success on a draft whose link was never stored. | Only if Gmail omits the nested `message.id`. Note the id choice itself is **correct** — `#drafts?compose=<message id>` is what the Gmail UI resolves; `draft.data.id` would be a dead link. |
+| E5 | **Trigger fired.** `fromEmail = ari@mangood.app` was set on `Mangood — Waitlist` while no `mangood.app` `sendAs` alias has ever been verified, and the one draft ever created (Alessio, forwardfooding.com, ~2026-08-23) was built with that `From:` header. Worse, the failure mode is not the documented one: Gmail commonly **rewrites** an unverified `From` to the primary address silently rather than erroring, so the draft route's comment claiming "Gmail rejects a `From` that isn't a verified `sendAs` alias" is an **unverified assumption** — nobody has watched it fail. `gmail.compose` still cannot enumerate aliases, so the app cannot preflight without a second sensitive scope. | **Fired — mitigated, not fixed.** `fromEmail` is cleared to **null** on the merged `Mangood` project until the alias actually verifies: `buildRawMessage` omits the header when null and Gmail falls back to the mailbox default, which is the clean degradation the field was designed for (1.12). Lift the mitigation when 0.b/0.c land and an alias verifies; settle rewrite-vs-reject by observation at the same time. `mangood.app`/`michikanji` are Resend domains, not Workspace ones — each needs inbound forwarding to receive Gmail's confirmation code before `sendAs` will verify (see Q5). |
 | E6 | `patch()` has no in-flight guard; a slow PATCH can revert a newer edit. | First observed lost edit. Cheap to fix, impossible to notice — accept the exposure. |
 | E7 | No server-side `status`/`kind` validation; a bad value renders an unselectable `Select` with no UI path back. | **Already firing.** `prisma/seed.ts` writes `Prospect`/`Contacted` onto rows whose `kind` defaults to `customer`, whose vocabulary has neither — those rows render a blank picker today. The seed was not updated with the two-pipeline migration. |
 | E8 | `StatusEvent` only records changes made through the accounts PATCH route. Imports and Prisma Studio bypass it silently. `Interaction` inherits this. | Before writing any second import script. |

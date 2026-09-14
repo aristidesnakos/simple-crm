@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { normalizeEmail } from "@/lib/contacts";
+import { gmailMailboxPath, normalizeEmail } from "@/lib/contacts";
 import { CONSENT_FIRST_JURISDICTIONS } from "@/lib/types";
 import {
   buildFooter,
@@ -206,11 +206,10 @@ export async function POST(request: NextRequest) {
     const draftId = draft.data.id;
     const messageId = draft.data.message?.id;
 
-    // Addressing the mailbox by email rather than by index. `u/0` is whichever Google
-    // account was signed in first, so the link opened the wrong mailbox — or a
-    // "no such account" page — as soon as a second account was signed in, which the
-    // Workspace tenant guarantees. Gmail resolves `u/<address>` to the right index.
-    const mailboxPath = senderEmail ? encodeURIComponent(senderEmail) : "0";
+    // Addressing the mailbox by email rather than by index — see gmailMailboxPath in
+    // lib/contacts.ts for why `u/0` is wrong. Shared with the conversation deep link in
+    // account-detail so the two cannot drift onto different mailboxes.
+    const mailboxPath = gmailMailboxPath(senderEmail);
     const draftLink = messageId
       ? `https://mail.google.com/mail/u/${mailboxPath}/#drafts?compose=${messageId}`
       : undefined;

@@ -98,3 +98,47 @@ export function validateSuppressionFields(
     validateDate("optedOutAt", body.optedOutAt)
   );
 }
+
+// --- Gmail deep links ---------------------------------------------------------------
+//
+// Both of these build a URL and nothing else: no fetch, no OAuth scope, no stored mail.
+// That is the whole point — see docs/ROADMAP.md D21. Reply VISIBILITY inside the CRM
+// was chosen over reply INDEXING, because indexing needs `gmail.readonly` (a Google
+// *restricted* scope, and therefore a CASA review unless the OAuth client is Internal to
+// the Workspace tenant), a sync route, and a local message index. Gmail is already the
+// client the mail is read and sent in (D1/D11), so one click into it buys the same
+// visibility for none of that cost.
+//
+// The accepted cost, recorded here so it is not rediscovered as a bug: this yields no
+// reply counts, no "who replied" column in /queue, and no response-time statistics.
+// Anyone reaching for a fetch here is re-opening D21, not fixing an oversight.
+
+// Gmail addresses a mailbox either by index (`u/0`) or by address (`u/someone@x.com`).
+// The index is whichever Google account signed in first, so it silently opens the wrong
+// mailbox — or a "no such account" page — as soon as a second account is present, which
+// a Workspace tenant guarantees. Always prefer the address; `0` is the last resort for
+// when we genuinely don't know who is signed in.
+export function gmailMailboxPath(mailbox: string | null | undefined): string {
+  return mailbox ? encodeURIComponent(mailbox) : "0";
+}
+
+// Every message exchanged with one contact, in Gmail's own search UI.
+//
+// Returns null when the contact has no address — there is nothing to search on, and the
+// caller renders nothing rather than a link that opens an empty inbox.
+export function gmailConversationUrl(
+  contactEmail: string | null | undefined,
+  mailbox?: string | null
+): string | null {
+  // Normalized for the same reason every other comparison here is: an address stored in
+  // mixed case is the same person, and Gmail's operators don't care, but a link built
+  // from untrimmed input does.
+  const address = normalizeEmail(contactEmail);
+  if (!address) return null;
+  // Gmail search operators, not free text. Both directions, because "the conversation"
+  // includes what they sent us — which is the entire reason this link exists.
+  const query = `from:${address} OR to:${address}`;
+  return `https://mail.google.com/mail/u/${gmailMailboxPath(
+    mailbox
+  )}/#search/${encodeURIComponent(query)}`;
+}

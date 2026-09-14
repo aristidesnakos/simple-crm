@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Account, KINDS, Project } from "@/lib/types";
-import { defaultStatusFor, statusOptionsFor } from "@/lib/contacts";
+import {
+  defaultStatusFor,
+  gmailConversationUrl,
+  statusOptionsFor,
+} from "@/lib/contacts";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,7 +20,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Ban, Mail, ExternalLink, Sparkles, Wand2 } from "lucide-react";
+import {
+  Ban,
+  Mail,
+  ExternalLink,
+  MessagesSquare,
+  Sparkles,
+  Wand2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { OptOutDialog } from "@/components/crm/opt-out-dialog";
 
@@ -107,6 +118,13 @@ export function AccountDetail({
   // the id, would not re-run them anyway. patch() and the opt-out handler both update
   // `local` optimistically, so deriving is both correct and cheaper.
   const suppressed = Boolean(local.optedOutAt);
+
+  // Also DERIVED, and deliberately just a string. This is the entire reply-visibility
+  // feature (docs/ROADMAP.md D21): no fetch, no Gmail scope, no stored mail. The mailbox
+  // comes from the signed-in session so the link opens the right account; with no session
+  // it falls back to Gmail's default mailbox, which is still useful in a browser that is
+  // already logged in. Null when the contact has no address.
+  const conversationUrl = gmailConversationUrl(local.email, session?.user?.email);
 
   async function patch(fields: Partial<Account>) {
     const before = local!;
@@ -222,8 +240,16 @@ export function AccountDetail({
       }
 
       toast.success("Draft created in Gmail.");
-      onUpdated({ ...local!, draftLink: result.data.draftLink });
-      setLocal((l) => (l ? { ...l, draftLink: result.data.draftLink } : l));
+      // Only when the route actually returned a link. Its write-back is conditional on
+      // Gmail supplying the nested message id, and it still returns 200 when that is
+      // missing — so an unconditional assignment blanked a previously good draftLink in
+      // memory while the DB kept the old one (docs/ROADMAP.md E4, client half). The
+      // server half of E4 is unchanged: a skipped write-back is still a silent 200.
+      const newDraftLink = result.data.draftLink;
+      if (newDraftLink) {
+        onUpdated({ ...local!, draftLink: newDraftLink });
+        setLocal((l) => (l ? { ...l, draftLink: newDraftLink } : l));
+      }
       setComposeOpen(false);
     } catch {
       toast.error("Couldn't reach the drafting service.");
@@ -374,6 +400,33 @@ export function AccountDetail({
             onBlur={() => patch({ notesLink: local.notesLink })}
             placeholder="https://..."
           />
+        </div>
+
+        <Separator />
+
+        <div className="space-y-2">
+          <h3 className="flex items-center gap-1.5 text-sm font-medium">
+            <MessagesSquare className="h-4 w-4" /> Conversation
+          </h3>
+          {conversationUrl ? (
+            <>
+              <Button asChild variant="outline" size="sm">
+                <a href={conversationUrl} target="_blank" rel="noreferrer">
+                  Open conversation in Gmail
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Opens a Gmail search for everything sent to or received from{" "}
+                {local.email}, in both directions. Replies are read in Gmail — the CRM
+                does not copy your mail.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Add an email address to jump to this contact&apos;s Gmail threads.
+            </p>
+          )}
         </div>
 
         <Separator />
