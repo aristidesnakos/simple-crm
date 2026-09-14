@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 // Dev-only capture endpoint for components/dev/dev-feedback.tsx — writes to
 // .claude/dev-feedback.json so an AI assistant can read and act on it later (see
-// .claude/skills/feedback/SKILL.md). Hard-gated below so this can never run — and
+// .claude/skills/iterate/SKILL.md). Hard-gated below so this can never run — and
 // never write to a production filesystem — if it somehow shipped. proxy.ts also
 // 403s it off localhost, but that is a tripwire; this gate is the real one.
 const ENABLED = process.env.NODE_ENV !== "production";

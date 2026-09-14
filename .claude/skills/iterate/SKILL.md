@@ -1,5 +1,5 @@
 ---
-name: feedback
+name: iterate
 description: Read open dev feedback from .claude/dev-feedback.json, fix each item in code, mark entries resolved. Use when the user says "address my feedback", "check the feedback log", or after a local testing session.
 argument-hint: [optional filter, e.g. a section name]
 ---

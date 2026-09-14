@@ -4,7 +4,7 @@
  * Dev-only visual feedback capture. Right-click any wrapped section to leave a
  * comment; a screenshot of that exact element is attached automatically. Entries
  * land in `.claude/dev-feedback.json` for an AI assistant (or a human) to act on
- * later — see `.claude/skills/feedback/SKILL.md`.
+ * later — see `.claude/skills/iterate/SKILL.md`.
  *
  * Ported from the same component in the swimmingrhodes-gr project. Two things
  * differ here: it uses this repo's shadcn tokens rather than hardcoded neutrals,
