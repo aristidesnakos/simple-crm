@@ -130,8 +130,13 @@ export function formatFrom(project: {
 // The first word of the contact's name, for `{{firstName}}`. Null when the name is unusable
 // as a salutation — an address pasted into the name field, or nothing at all — so the
 // template falls back to a neutral greeting instead of "Hi jamie@example.com".
+// Titles are skipped, so "Dr Aimee Eyvazzadeh" is "Hi Aimee," rather than "Hi Dr,". A
+// title alone with nothing after it yields null, like any other unusable name.
+const HONORIFICS = new Set(["dr", "mr", "mrs", "ms", "mx", "miss", "prof", "sir"]);
+
 export function firstNameOf(name: string | null | undefined): string | null {
-  const first = name?.trim().split(/\s+/)[0];
+  const words = name?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const first = words.find((w) => !HONORIFICS.has(w.toLowerCase().replace(/\.$/, "")));
   if (!first || first.includes("@")) return null;
   return first;
 }
