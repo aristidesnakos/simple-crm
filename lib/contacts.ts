@@ -34,6 +34,31 @@ export function defaultStatusFor(kind: string | null | undefined): string {
   return statusOptionsFor(kind)[0];
 }
 
+// Where a contact moves when mail actually goes out, or actually comes back — written by
+// the Resend routes (docs/ROADMAP.md D23), which are the first code that KNOWS either
+// happened. Only forward from the early stages: a reply from someone already `Onboarded`
+// must not drag them back to `Replied`. Anything not listed stays where it is.
+const STATUS_AFTER_SEND: Record<string, Record<string, string>> = {
+  customer: { "Signed Up": "Emailed" },
+  collaborator: { Prospect: "Contacted" },
+};
+const STATUS_AFTER_REPLY: Record<string, Record<string, string>> = {
+  customer: { "Signed Up": "Replied", Emailed: "Replied" },
+  collaborator: { Prospect: "Engaged", Contacted: "Engaged" },
+};
+
+export function statusAfterSend(kind: string, status: string): string {
+  return STATUS_AFTER_SEND[kind]?.[status] ?? status;
+}
+
+export function statusAfterReply(kind: string, status: string): string {
+  return STATUS_AFTER_REPLY[kind]?.[status] ?? status;
+}
+
+// After a send, the loop is "waiting for them", not "owed by us" — so the contact leaves
+// /queue until this many days pass without a reply, then comes back as a follow-up.
+export const FOLLOW_UP_DAYS = 7;
+
 // --- RS-01 compliance validation ---------------------------------------------------
 //
 // Narrow by design. docs/ROADMAP.md parks broad request validation ("zod, 500→400 …

@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { QueueRow, STATUS_COLOR } from "@/lib/types";
+import { Project, QueueRow, STATUS_COLOR } from "@/lib/types";
 import { TopBar } from "@/components/crm/top-bar";
 import { DevFeedback } from "@/components/dev/dev-feedback";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Inbox } from "lucide-react";
+import { checkReplies } from "@/components/crm/check-replies";
 
 const DAY = 86_400_000;
 
@@ -42,6 +44,11 @@ export function QueueView() {
   const [loadedAt, setLoadedAt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Whether any business sends through Resend, and so has replies to pull in. Asked of
+  // /api/projects rather than read off the rows: an empty queue is exactly when a reply
+  // check matters, since a reply is what puts someone back in it.
+  const [hasResend, setHasResend] = useState(false);
+  const [checking, setChecking] = useState(false);
 
   const load = useCallback(() => {
     fetch("/api/queue")
@@ -63,6 +70,22 @@ export function QueueView() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((r) => (r.ok ? (r.json() as Promise<Project[]>) : []))
+      .then((projects) => setHasResend(projects.some((p) => p.sendVia === "resend")))
+      .catch(() => {});
+  }, []);
+
+  async function runCheckReplies() {
+    setChecking(true);
+    const result = await checkReplies();
+    setChecking(false);
+    // The queue owns its own fetch, so a reply that changed someone's due date is picked
+    // up by reloading rather than splicing.
+    if (result && result.imported > 0) load();
+  }
+
   return (
     <div className="flex h-full flex-col">
       <DevFeedback name="Crm.TopBar">
@@ -71,12 +94,25 @@ export function QueueView() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <DevFeedback name="Queue.List">
           <div className="mx-auto max-w-3xl px-6 py-8">
-            <div className="mb-6">
-              <h1 className="text-xl font-semibold">Queue</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Every open loop, across every project. Contacts whose next action is
-                due, overdue, or never set.
-              </p>
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-xl font-semibold">Queue</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Every open loop, across every project. Contacts whose next action is
+                  due, overdue, or never set.
+                </p>
+              </div>
+              {hasResend && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={runCheckReplies}
+                  disabled={checking}
+                >
+                  <Inbox className={cn("h-3.5 w-3.5", checking && "animate-pulse")} />
+                  {checking ? "Checking…" : "Check replies"}
+                </Button>
+              )}
             </div>
 
             {loading && (

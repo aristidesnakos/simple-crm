@@ -21,6 +21,8 @@ export async function POST(request: NextRequest) {
     status?: string;
     approach?: string | null;
     fromEmail?: unknown;
+    fromName?: string | null;
+    sendVia?: string;
   };
   try {
     body = await request.json();
@@ -37,6 +39,8 @@ export async function POST(request: NextRequest) {
       status: body.status ?? "Active",
       approach: body.approach ?? null,
       fromEmail: normalizeEmail(body.fromEmail),
+      fromName: body.fromName?.trim() || null,
+      sendVia: body.sendVia ?? "gmail",
     },
   });
   return NextResponse.json(project, { status: 201 });

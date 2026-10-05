@@ -5,7 +5,20 @@ export type Project = {
   status: string;
   approach: string | null;
   fromEmail: string | null;
+  fromName: string | null;
+  // One of SEND_VIA. Free text server-side; anything unrecognized behaves as "gmail".
+  sendVia: string;
   _count?: { accounts: number };
+};
+
+// How a business's mail leaves (docs/ROADMAP.md D23). `gmail` is the original path: the
+// app creates a draft in the signed-in mailbox and a human sends it from Gmail. `resend`
+// sends from the CRM through Resend and polls replies back into `Interaction`, which
+// then IS the record — there is no Gmail copy of that conversation.
+export const SEND_VIA = ["gmail", "resend"] as const;
+export const SEND_VIA_LABEL: Record<string, string> = {
+  gmail: "Gmail drafts",
+  resend: "Resend (send from the CRM)",
 };
 
 export type Account = {
@@ -77,7 +90,9 @@ export const INTERACTION_DIRECTIONS = ["outbound", "inbound"] as const;
 
 // Hand-mirrored from prisma/schema.prisma, like StatusEvent above. Dates are strings
 // because they cross JSON. `threadId` is null for everything written by hand and is
-// the hook the deferred Gmail thread index attaches to.
+// the hook the deferred Gmail thread index attaches to. The fields after it are set only
+// for email that went through Resend (D23) — see the schema comment for why bodies are
+// stored here when they never were for Gmail.
 export type Interaction = {
   id: string;
   accountId: string;
@@ -86,7 +101,24 @@ export type Interaction = {
   occurredAt: string;
   summary: string;
   threadId: string | null;
+  externalId: string | null;
+  messageId: string | null;
+  subject: string | null;
+  body: string | null;
+  fromAddress: string | null;
+  toAddress: string | null;
+  deliveryStatus: string | null;
 };
+
+// Resend `last_event` values that mean the message did not reach a person, or reached one
+// who objected. Rendered loud in the timeline; everything else is rendered quiet.
+export const DELIVERY_PROBLEMS = [
+  "bounced",
+  "complained",
+  "failed",
+  "suppressed",
+  "canceled",
+] as const;
 
 export const KINDS = ["customer", "collaborator"] as const;
 export const DEFAULT_KIND = "customer";

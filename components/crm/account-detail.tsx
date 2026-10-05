@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Account, KINDS, Project } from "@/lib/types";
+import { Account, Interaction, KINDS, Project } from "@/lib/types";
 import {
   defaultStatusFor,
   gmailConversationUrl,
   statusOptionsFor,
 } from "@/lib/contacts";
+import { formatFrom, replySubject } from "@/lib/outreach";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,9 +28,11 @@ import {
   MessagesSquare,
   Sparkles,
   Wand2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { OptOutDialog } from "@/components/crm/opt-out-dialog";
+import { ConversationTimeline } from "@/components/crm/conversation-timeline";
 
 export function AccountDetail({
   account,
@@ -37,6 +40,8 @@ export function AccountDetail({
   projects,
   onUpdated,
   onSuppressed,
+  mailVersion,
+  onMailSent,
 }: {
   account: Account | null;
   project: Project | null;
@@ -45,6 +50,11 @@ export function AccountDetail({
   // Separate from onUpdated because a suppression can touch rows this pane never had —
   // the same person in another campaign. CrmApp splices them all.
   onSuppressed: (optedOutAt: string, affectedIds: string[]) => void;
+  // Resend projects only. Changes whenever mail moved, so the timeline below remounts.
+  mailVersion: number;
+  // A message actually left through Resend. Separate from onUpdated because it also has to
+  // tell CrmApp to bump mailVersion.
+  onMailSent: (account: Account) => void;
 }) {
   const { data: session } = useSession();
   const [local, setLocal] = useState<Account | null>(account);
@@ -54,6 +64,10 @@ export function AccountDetail({
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [optOutOpen, setOptOutOpen] = useState(false);
+  // The received message the composer is answering, for Resend projects. Set only by the
+  // Reply button and cleared by opening a fresh composer — never by an effect, so a stale
+  // value can exist only while the composer is closed, where nothing reads it.
+  const [replyTo, setReplyTo] = useState<Interaction | null>(null);
   // The footer the route will append, fetched once. Not derived from anything on the
   // client because the values live in the server's environment.
   const [footer, setFooter] = useState<{
@@ -125,6 +139,25 @@ export function AccountDetail({
   // it falls back to Gmail's default mailbox, which is still useful in a browser that is
   // already logged in. Null when the contact has no address.
   const conversationUrl = gmailConversationUrl(local.email, session?.user?.email);
+
+  // How this business's mail leaves (docs/ROADMAP.md D23). On Resend the CRM sends and
+  // holds the conversation; there is no Gmail draft, no Google sign-in requirement, and no
+  // Gmail thread to link to.
+  const viaResend = project?.sendVia === "resend";
+  const sendFrom = project ? formatFrom(project) : null;
+  const canCompose = viaResend ? Boolean(sendFrom) : Boolean(session);
+
+  function openComposer() {
+    setReplyTo(null);
+    setComposeOpen(true);
+  }
+
+  function startReply(interaction: Interaction) {
+    setReplyTo(interaction);
+    setSubject(replySubject(interaction.subject));
+    setBody("");
+    setComposeOpen(true);
+  }
 
   async function patch(fields: Partial<Account>) {
     const before = local!;
@@ -253,6 +286,77 @@ export function AccountDetail({
       setComposeOpen(false);
     } catch {
       toast.error("Couldn't reach the drafting service.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // One POST to the Resend route, which takes a list; the composer sends a list of one.
+  async function postSend(acknowledgeJurisdiction: boolean) {
+    const res = await fetch("/api/resend/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sends: [
+          {
+            accountId: local!.id,
+            subject,
+            body,
+            ...(replyTo ? { inReplyTo: replyTo.id } : {}),
+            ...(acknowledgeJurisdiction ? { acknowledgeJurisdiction: true } : {}),
+          },
+        ],
+      }),
+    });
+    // res.ok before res.json() — see postDraft. A request-level failure (no API key, no
+    // footer identity) is a non-2xx; a per-message refusal is a 200 with ok: false.
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: false as const, error: data.error as string | undefined };
+    }
+    const { results } = await res.json();
+    return results[0] as
+      | { ok: true; account: Account; warning?: string }
+      | { ok: false; error?: string; requiresAcknowledgement?: true };
+  }
+
+  // Same shape as createDraft — confirm, one POST, a second only on requiresAcknowledgement
+  // — plus a confirm up front, because unlike a Gmail draft this cannot be reviewed again
+  // after the click.
+  async function sendViaResend() {
+    if (!local!.email) {
+      toast.error("This account has no email address on file.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Send this to ${local!.email} now, from ${sendFrom}?\n\nIt goes out immediately ` +
+          "and can't be recalled."
+      )
+    ) {
+      return;
+    }
+    setSending(true);
+    try {
+      let result = await postSend(false);
+      if (!result.ok && "requiresAcknowledgement" in result && result.requiresAcknowledgement) {
+        if (!window.confirm(`${result.error}\n\nSend anyway?`)) return;
+        result = await postSend(true);
+      }
+      if (!result.ok) {
+        toast.error(result.error ?? "Couldn't send that email.");
+        return;
+      }
+      if (result.warning) toast.warning(result.warning);
+      else toast.success(`Sent to ${local!.email}.`);
+      // local is keyed on the account id and won't pick up the parent's copy of the same
+      // account, so mirror the server's row here too.
+      setLocal((l) => (l ? { ...l, ...result.account } : l));
+      onMailSent(result.account);
+      setReplyTo(null);
+      setComposeOpen(false);
+    } catch {
+      toast.error("Couldn't reach the server. Check the conversation before sending again.");
     } finally {
       setSending(false);
     }
@@ -408,7 +512,13 @@ export function AccountDetail({
           <h3 className="flex items-center gap-1.5 text-sm font-medium">
             <MessagesSquare className="h-4 w-4" /> Conversation
           </h3>
-          {conversationUrl ? (
+          {viaResend ? (
+            <ConversationTimeline
+              key={`${local.id}:${mailVersion}`}
+              accountId={local.id}
+              onReply={startReply}
+            />
+          ) : conversationUrl ? (
             <>
               <Button asChild variant="outline" size="sm">
                 <a href={conversationUrl} target="_blank" rel="noreferrer">
@@ -434,9 +544,9 @@ export function AccountDetail({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-1.5 text-sm font-medium">
-              <Mail className="h-4 w-4" /> Email draft
+              <Mail className="h-4 w-4" /> {viaResend ? "Email" : "Email draft"}
             </h3>
-            {local.draftLink && (
+            {!viaResend && local.draftLink && (
               <a
                 href={local.draftLink}
                 target="_blank"
@@ -448,7 +558,14 @@ export function AccountDetail({
             )}
           </div>
 
-          {!session && (
+          {viaResend && !sendFrom && (
+            <p className="text-xs text-muted-foreground">
+              {project?.name} sends through Resend but has no Send-from address. Set one
+              in the project&apos;s settings to send from here.
+            </p>
+          )}
+
+          {!viaResend && !session && (
             <p className="text-xs text-muted-foreground">
               Sign in with Google (top right) to create real Gmail drafts from
               here.
@@ -457,24 +574,44 @@ export function AccountDetail({
 
           {suppressed && (
             <p className="text-xs text-muted-foreground">
-              Drafting is disabled for a contact who has opted out. This is an
-              affordance, not the control — the draft route refuses regardless.
+              {viaResend ? "Sending" : "Drafting"} is disabled for a contact who has
+              opted out. This is an affordance, not the control — the server refuses
+              regardless.
             </p>
           )}
 
-          {session && !suppressed && !composeOpen && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setComposeOpen(true)}
-            >
+          {canCompose && !suppressed && !composeOpen && (
+            <Button variant="outline" size="sm" onClick={openComposer}>
               <Sparkles className="h-3.5 w-3.5" />
-              {local.draftLink ? "Draft another follow-up" : "Draft an email"}
+              {viaResend
+                ? "Write an email"
+                : local.draftLink
+                  ? "Draft another follow-up"
+                  : "Draft an email"}
             </Button>
           )}
 
-          {session && !suppressed && composeOpen && (
+          {canCompose && !suppressed && composeOpen && (
             <div className="space-y-2 rounded-lg border p-3">
+              {viaResend && (
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="truncate">
+                    From {sendFrom} · to {local.email ?? "—"}
+                  </span>
+                  {replyTo && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5">
+                      Replying to &ldquo;{replyTo.subject ?? replyTo.summary}&rdquo;
+                      <button
+                        type="button"
+                        aria-label="Stop replying to this message"
+                        onClick={() => setReplyTo(null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
               {project?.approach && (
                 <details className="rounded-md border bg-muted/40 p-2" open>
                   <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
@@ -516,10 +653,16 @@ export function AccountDetail({
                 </Button>
                 <Button
                   size="sm"
-                  onClick={createDraft}
-                  disabled={sending || !body.trim()}
+                  onClick={viaResend ? sendViaResend : createDraft}
+                  disabled={sending || !body.trim() || !subject.trim()}
                 >
-                  {sending ? "Creating…" : "Create Gmail draft"}
+                  {viaResend
+                    ? sending
+                      ? "Sending…"
+                      : "Send"
+                    : sending
+                      ? "Creating…"
+                      : "Create Gmail draft"}
                 </Button>
                 </div>
               </div>

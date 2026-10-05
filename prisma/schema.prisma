@@ -13,8 +13,17 @@ model Project {
   description String?
   status      String    @default("Active") // Active | Paused | Complete
   approach    String? // Email template / approach notes
-  fromEmail   String? // Sending identity for this campaign, e.g. hello@mangood.app.
+  fromEmail   String? // Sending identity for this business, e.g. ari@mail.mangood.app.
   // Null falls back to the authenticated mailbox default. See docs/ROADMAP.md task 1.3.
+  // The display half of the From header ("Ari" in `Ari <ari@mail.mangood.app>`). A separate
+  // column because fromEmail goes through normalizeEmail, which lowercases — a display name
+  // stored inside it would come out as "ari". Resend sends only; Gmail drafts ignore it.
+  fromName    String?
+  // How this business's mail leaves (docs/ROADMAP.md D23). Free text like every other
+  // vocabulary here; allowed values live in lib/types.ts as SEND_VIA.
+  //   gmail  — the app creates a draft in the signed-in mailbox; a human sends it from Gmail.
+  //   resend — the app sends through Resend from fromEmail, and polls replies back in.
+  sendVia     String    @default("gmail") // gmail | resend
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   accounts    Account[]
@@ -120,6 +129,27 @@ model Interaction {
   // Set only for entries derived from a real Gmail thread. Null for everything
   // written by hand.
   threadId   String?
+
+  // --- Email through Resend (docs/ROADMAP.md D23) -----------------------------------
+  // Null for hand-written entries. For a project with sendVia = "resend" there is no
+  // Gmail copy of the conversation, so this table IS the record, and it keeps bodies —
+  // the "headers only, bodies stay in Gmail" rule above assumed a Gmail that holds them.
+  // Resend keeps email data for 30 days, so a body not stored here is gone after that.
+  //
+  // Resend's own id for the email — the send response's id outbound, the received
+  // email's id inbound. Unique so polling for replies is idempotent.
+  externalId     String?  @unique
+  // RFC 5322 Message-ID. Outbound it is filled in after the send (Resend returns only
+  // its own id from POST /emails); inbound it is what a reply's In-Reply-To points at.
+  messageId      String?
+  subject        String?
+  // Plain text exactly as sent, footer included — or as received.
+  body           String?
+  fromAddress    String?
+  toAddress      String?
+  // Resend's last_event for outbound mail: sent | delivered | bounced | complained |
+  // suppressed | failed | … Refreshed when replies are polled. Null inbound.
+  deliveryStatus String?
   createdAt  DateTime @default(now())
 
   @@index([accountId, occurredAt])

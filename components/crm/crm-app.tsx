@@ -32,6 +32,10 @@ export function CrmApp() {
   const [loading, setLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
+  // Bumped whenever mail moves through Resend — a send, an invite batch, a reply check —
+  // so the open contact's conversation timeline remounts and refetches. The timeline owns
+  // its own fetch (children own the fetch), and this is the only signal it needs.
+  const [mailVersion, setMailVersion] = useState(0);
 
   const loadProjects = useCallback(() => {
     fetch("/api/projects")
@@ -131,6 +135,15 @@ export function CrmApp() {
     setAccounts((prev) =>
       prev.map((a) => (ids.has(a.id) ? { ...a, optedOutAt } : a))
     );
+  }
+
+  // Several rows at once, from an invite batch or a reply check. Never a project move —
+  // those only come from the detail form — so this is a straight splice by id. Rows not
+  // in the open project are ignored here and pick up the change on their next load.
+  function handleAccountsUpdated(updated: Account[]) {
+    const byId = new Map(updated.map((a) => [a.id, a]));
+    setAccounts((prev) => prev.map((a) => byId.get(a.id) ?? a));
+    setMailVersion((v) => v + 1);
   }
 
   function handleAccountUpdated(updated: Account) {
@@ -246,6 +259,7 @@ export function CrmApp() {
                 }
                 onSelect={setSelectedAccountId}
                 onCreated={handleAccountCreated}
+                onAccountsUpdated={handleAccountsUpdated}
               />
             </DevFeedback>
           </ResizablePanel>
@@ -258,6 +272,8 @@ export function CrmApp() {
                 projects={projects}
                 onUpdated={handleAccountUpdated}
                 onSuppressed={handleAccountSuppressed}
+                mailVersion={mailVersion}
+                onMailSent={(updated) => handleAccountsUpdated([updated])}
               />
             </DevFeedback>
           </ResizablePanel>

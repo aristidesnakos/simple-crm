@@ -18,6 +18,11 @@ export async function PATCH(
       ...(body.fromEmail !== undefined && {
         fromEmail: normalizeEmail(body.fromEmail),
       }),
+      // Not normalized: a display name keeps its case ("Ari", not "ari").
+      ...(body.fromName !== undefined && {
+        fromName: body.fromName?.trim() || null,
+      }),
+      ...(body.sendVia !== undefined && { sendVia: body.sendVia }),
     },
   });
   return NextResponse.json(project);

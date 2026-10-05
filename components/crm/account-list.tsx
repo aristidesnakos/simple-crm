@@ -14,8 +14,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Search } from "lucide-react";
+import { Inbox, Plus, Search, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { InviteDialog } from "@/components/crm/invite-dialog";
+import { checkReplies } from "@/components/crm/check-replies";
 
 export function AccountList({
   project,
@@ -25,6 +27,7 @@ export function AccountList({
   onRetry,
   onSelect,
   onCreated,
+  onAccountsUpdated,
 }: {
   project: Project | null;
   accounts: Account[];
@@ -33,12 +36,32 @@ export function AccountList({
   onRetry: () => void;
   onSelect: (id: string) => void;
   onCreated: (account: Account) => void;
+  // Rows changed by an invite batch or a reply check. CrmApp splices them.
+  onAccountsUpdated: (accounts: Account[]) => void;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
+
+  // A business on Resend has no Gmail copy of its mail (docs/ROADMAP.md D23), so the two
+  // things Gmail used to do for it — send, and show replies — live here instead.
+  const viaResend = project?.sendVia === "resend";
+
+  async function runCheckReplies() {
+    setChecking(true);
+    const result = await checkReplies();
+    setChecking(false);
+    if (!result) return;
+    setCheckedAt(result.checkedAt);
+    // Always called, even with no changed rows: delivery status may have moved, and the
+    // open timeline should show it.
+    onAccountsUpdated(result.accounts);
+  }
 
   const filtered = accounts.filter((a) => {
     const q = query.toLowerCase();
@@ -100,6 +123,41 @@ export function AccountList({
             className="h-8 pl-7 text-sm"
           />
         </div>
+        {viaResend && (
+          <>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 shrink-0"
+              onClick={runCheckReplies}
+              disabled={checking}
+              title={
+                checkedAt
+                  ? `Check for replies (last checked ${checkedAt.slice(11, 16)} UTC)`
+                  : "Check for replies"
+              }
+              aria-label="Check for replies"
+            >
+              <Inbox className={cn("h-4 w-4", checking && "animate-pulse")} />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0"
+              onClick={() => setInviteOpen(true)}
+            >
+              <Send className="h-3.5 w-3.5" />
+              Invite
+            </Button>
+            <InviteDialog
+              project={project}
+              accounts={accounts}
+              open={inviteOpen}
+              onOpenChange={setInviteOpen}
+              onSent={onAccountsUpdated}
+            />
+          </>
+        )}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0">

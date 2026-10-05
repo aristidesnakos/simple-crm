@@ -100,11 +100,18 @@ async function main() {
         to: e.toStatus,
         at: e.changedAt,
       })),
+      // Message content is personal data we hold, so an access request gets it. Only set for
+      // email that went through Resend (docs/ROADMAP.md D23); null on everything else.
       interactions: a.interactions.map((i) => ({
         channel: i.channel,
         direction: i.direction,
         occurredAt: i.occurredAt,
         summary: i.summary,
+        from: i.fromAddress,
+        to: i.toAddress,
+        subject: i.subject,
+        body: i.body,
+        deliveryStatus: i.deliveryStatus,
       })),
     })),
     doNotContactRecord: suppression

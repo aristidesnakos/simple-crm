@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { gmailMailboxPath, normalizeEmail } from "@/lib/contacts";
-import { CONSENT_FIRST_JURISDICTIONS } from "@/lib/types";
+import { gmailMailboxPath } from "@/lib/contacts";
 import {
-  buildFooter,
+  buildMessageText,
   encodeSubject,
   resolveSenderIdentity,
   senderIdentityProblem,
   type SenderIdentity,
 } from "@/lib/outreach";
+import { jurisdictionRefusal, suppressionRefusal } from "@/lib/outreach-gates";
 
 // Builds an RFC 2822 message and base64url-encodes it, per the Gmail API's
 // drafts.create requirements.
@@ -29,10 +29,9 @@ function buildRawMessage({
   from?: string | null;
   subject: string;
   body: string;
-  // Who is legally sending. The footer is appended HERE rather than in the route body,
-  // because this function is the single chokepoint every outbound message passes through
-  // — including any future POST /api/gmail/send. Putting it in the route would leave the
-  // next send path uncovered.
+  // Who is legally sending. The footer is appended by buildMessageText in lib/outreach.ts,
+  // which is the chokepoint for every transport — this function and the Resend send route
+  // both call it, so neither can build a message without the footer.
   //
   // And not in the compose system prompt: a model given a formatting instruction complies
   // most of the time, which is the wrong reliability class for a statutory disclosure, and
@@ -47,11 +46,7 @@ function buildRawMessage({
     `Subject: ${encodeSubject(subject)}`,
     "Content-Type: text/plain; charset=utf-8",
     "",
-    // trimEnd so a body that happens to end in newlines doesn't push the footer several
-    // blank lines away from the sign-off.
-    body.trimEnd(),
-    "",
-    buildFooter(identity),
+    buildMessageText(body, identity),
   ].join("\n");
 
   return Buffer.from(message)
@@ -121,58 +116,43 @@ export async function POST(request: NextRequest) {
       name: true,
       jurisdiction: true,
       consentedAt: true,
-      project: { select: { fromEmail: true } },
+      project: { select: { name: true, fromEmail: true, sendVia: true } },
     },
   });
   if (!account) {
     return NextResponse.json({ error: "No such contact." }, { status: 404 });
   }
 
-  // Suppression first, and with no override parameter. A request reaching this branch is
-  // asking the application to contact someone who told us to stop; there is no argument
-  // the caller could pass that makes that acceptable, so there is no argument to pass.
-  // Deliberately asymmetric with the jurisdiction gate below.
-  //
-  // Keyed on the recipient address rather than on the account row, so an opt-out recorded
-  // against this person in ANY project blocks this draft too. Normalized the same way it
-  // was on the way in — a lookup on the raw `to` would miss a suppression stored
-  // lowercase, which is every suppression. And on `to` rather than account.email, because
-  // `to` is what actually goes in the header: gating on anything else leaves a hole.
-  const suppressed = await prisma.suppression.findUnique({
-    where: { email: normalizeEmail(to) ?? "" },
-  });
-  if (suppressed) {
+  // A business that sends through Resend has its From on a domain that is not a verified
+  // Gmail send-as alias — that is why it sends through Resend. A Gmail draft carrying that
+  // From is exactly docs/ROADMAP.md E5: Gmail rewrites or rejects it. And the reply would
+  // land in Resend, not in this mailbox, splitting the record D23 puts in the CRM.
+  if (account.project.sendVia === "resend") {
     return NextResponse.json(
       {
         error:
-          `${account.name} opted out on ` +
-          `${suppressed.optedOutAt.toISOString().slice(0, 10)}. No draft was created.`,
+          `${account.project.name} sends through Resend, not Gmail drafts. Use Send ` +
+          `in the composer.`,
       },
       { status: 409 }
     );
   }
 
-  // Jurisdiction gate. Unlike suppression this is an "are you sure" and not a "no":
-  // consent-first is a rule about unsolicited FIRST contact, and the operator may hold a
-  // basis the database doesn't know about. The acknowledgement is per-request and is never
-  // written to the row — a persisted acknowledgement is a permission, and this deliberately
-  // is not one. Same reasoning as CRM_I_KNOW_THE_API_IS_UNAUTHENTICATED in proxy.ts: make
-  // the override loud, and make it cost something every time.
-  const consentFirst = (CONSENT_FIRST_JURISDICTIONS as readonly string[]).includes(
-    account.jurisdiction ?? ""
-  );
-  if (consentFirst && !account.consentedAt && payload.acknowledgeJurisdiction !== true) {
+  // Suppression first, then the jurisdiction gate — both in lib/outreach-gates.ts, shared
+  // with the Resend send route. Suppression is a "no" with no override parameter; the
+  // jurisdiction gate is an "are you sure" carrying requiresAcknowledgement. Gated on `to`
+  // rather than account.email, because `to` is what actually goes in the header.
+  const refusal =
+    (await suppressionRefusal(account.name, to)) ??
+    jurisdictionRefusal(account, payload.acknowledgeJurisdiction === true);
+  if (refusal) {
+    const { status, error, ...rest } = refusal;
     return NextResponse.json(
       {
-        error:
-          `${account.name} is recorded in ${account.jurisdiction}, where a first ` +
-          `unsolicited email needs consent, and no consent date is on file. Record ` +
-          `consent on the contact, or confirm you have a basis for this send.`,
-        // The discriminator that lets the client tell an overridable 409 from an absolute
-        // one without string-matching the message. Absent on the suppression refusal.
-        requiresAcknowledgement: true,
+        error: rest.requiresAcknowledgement ? error : `${error} No draft was created.`,
+        ...rest,
       },
-      { status: 409 }
+      { status }
     );
   }
 

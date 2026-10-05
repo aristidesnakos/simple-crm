@@ -92,3 +92,134 @@ export function encodeSubject(subject: string): string {
   if (!/[^\x00-\x7F]/.test(subject)) return subject;
   return `=?utf-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
 }
+
+// The whole outbound text: what the operator wrote, then the footer. The single chokepoint
+// for BOTH transports — the Gmail draft route and the Resend send route each call this and
+// nothing else, so a third send path cannot forget the footer by building its own string.
+// It used to live inside buildRawMessage, which was the chokepoint while Gmail was the only
+// way out (docs/ROADMAP.md D23).
+//
+// trimEnd so a body that happens to end in newlines doesn't push the footer several blank
+// lines away from the sign-off.
+export function buildMessageText(body: string, identity: SenderIdentity): string {
+  return `${body.trimEnd()}\n\n${buildFooter(identity)}`;
+}
+
+// --- Resend sends (D23) -------------------------------------------------------------
+//
+// Everything below is pure and safe to import from a client component, which is the
+// point: the invite dialog previews with exactly the functions the server sends with.
+
+// `Ari <ari@mail.mangood.app>`. Quoted only when the name needs it: a comma or a period in
+// a bare display name is parsed as a second address, but a plain "Ari" reads better without
+// quotes, in the header and in the UI that shows this same string. Null when there is no
+// address at all — the caller refuses to send rather than letting a provider pick a default.
+export function formatFrom(project: {
+  fromEmail: string | null;
+  fromName: string | null;
+}): string | null {
+  if (!project.fromEmail) return null;
+  const name = project.fromName?.trim();
+  if (!name) return project.fromEmail;
+  // RFC 5322 atext plus spaces between words — anything else must be a quoted string.
+  const plain = /^[A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+( [A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+)*$/;
+  const display = plain.test(name) ? name : `"${name.replace(/["\\]/g, "\\$&")}"`;
+  return `${display} <${project.fromEmail}>`;
+}
+
+// The first word of the contact's name, for `{{firstName}}`. Null when the name is unusable
+// as a salutation — an address pasted into the name field, or nothing at all — so the
+// template falls back to a neutral greeting instead of "Hi jamie@example.com".
+export function firstNameOf(name: string | null | undefined): string | null {
+  const first = name?.trim().split(/\s+/)[0];
+  if (!first || first.includes("@")) return null;
+  return first;
+}
+
+export const TEMPLATE_FALLBACK_NAME = "there";
+
+// Fills `{{firstName}}` and `{{name}}`. Anything else in double braces is left in place on
+// purpose, so unresolvedPlaceholders can refuse it: a typo like `{{fistName}}` must stop
+// the send, not go out literally to every recipient.
+export function renderTemplate(
+  template: string,
+  contact: { name: string }
+): string {
+  const first = firstNameOf(contact.name) ?? TEMPLATE_FALLBACK_NAME;
+  return template
+    .replace(/\{\{\s*firstName\s*\}\}/g, first)
+    .replace(/\{\{\s*name\s*\}\}/g, contact.name.trim() || TEMPLATE_FALLBACK_NAME);
+}
+
+export function unresolvedPlaceholders(text: string): string[] {
+  return Array.from(new Set(text.match(/\{\{[^}]*\}\}/g) ?? []));
+}
+
+// "Re: <subject>", without stacking "Re: Re: Re:".
+export function replySubject(subject: string | null | undefined): string {
+  const s = subject?.trim() || "";
+  return /^re:/i.test(s) ? s : `Re: ${s}`.trim();
+}
+
+// Received mail sometimes has no text part. A crude strip is enough: this is read by the
+// operator in a <pre>, never rendered as HTML, and never passed to the compose model.
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Does this reply ask us to stop? The footer tells people to reply with the word "stop",
+// and every Resend send carries a `List-Unsubscribe: <mailto:…?subject=unsubscribe>`
+// header, so both arrive here as ordinary inbound mail.
+//
+// Deliberately strict — the subject, or the first line of the reply above any quoted text,
+// must BE the request, not merely contain it. "Don't stop sending these!" is not an
+// opt-out. A false positive suppresses someone who didn't ask, which is the safe direction
+// and is visible on the contact; a false negative is still caught by the operator reading
+// the reply, exactly as it was before replies came into the CRM at all.
+const OPT_OUT_PHRASES = new Set([
+  "stop",
+  "unsubscribe",
+  "please stop",
+  "stop please",
+  "remove me",
+  "unsubscribe me",
+  "please unsubscribe",
+  "please remove me",
+]);
+
+function asOptOutPhrase(line: string): boolean {
+  return OPT_OUT_PHRASES.has(
+    line
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+export function isOptOutReply(subject: string | null, text: string | null): boolean {
+  if (subject && asOptOutPhrase(subject.replace(/^\s*(re|fwd?):\s*/i, ""))) {
+    return true;
+  }
+  if (!text) return false;
+  // Only what they wrote, not what they quoted: stop at the first quoted line or the
+  // "On <date>, <name> wrote:" attribution most clients put above it.
+  const lines: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*>/.test(line) || /^On .+wrote:\s*$/.test(line.trim())) break;
+    if (line.trim()) lines.push(line);
+  }
+  return lines.length > 0 && asOptOutPhrase(lines[0]);
+}

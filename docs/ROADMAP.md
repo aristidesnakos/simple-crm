@@ -23,7 +23,7 @@ its own Q3 and specified the stats engine anyway.
 
 ## 2. Decisions added this revision
 
-D1–D11 stand in the archive unless listed here. D21–D22 were added **2026-09-14**,
+D1–D11 stand in the archive unless listed here. D23 was added **2026-10-05**. D21–D22 were added **2026-09-14**,
 after a review of the email architecture.
 
 | # | Decision | Rationale |
@@ -38,6 +38,7 @@ after a review of the email architecture.
 | **D18** | **No owner column, no `Account`→`Contact` rename yet**, despite "tool now, product later". | At one owner the backfill is a one-line `UPDATE`; the expensive part is ownership filtering across every route, and that costs the same whenever it's paid. Rename trigger: the day a Prisma adapter is added, bundled with it. |
 | **D21** | **Reply visibility, not reply indexing** — ship a per-contact "Open conversation in Gmail" link in `account-detail`, not a `gmail.readonly` scope, a sync route, an `Interaction` index and reply stats. **D14 is therefore not reversed.** | The index was scoped and rejected on cost/risk: `gmail.readonly` is a Google **restricted** scope, so without 0.d (OAuth client in the tenant, **Internal** consent screen) it triggers a CASA security review — weeks, uncertain outcome — and it still needs a sync route, a local metadata index, a timeline UI, and careful handling of the D20 CRM/Gmail boundary (Gmail-derived content must never enter the `/api/compose` brief). What ships instead is a plain client-side URL, `https://mail.google.com/mail/u/<url-encoded mailbox address>/#search/<url-encoded query>` with the query `from:<contact email> OR to:<contact email>`: **zero new OAuth scopes, zero sync, zero stored mail data, no re-consent**, one click from a contact to the whole thread history in Gmail — which is already where mail is read and sent (D1/D11, and answer 2 of the 2026-09-14 clarification). Accepted cost, recorded so it is not rediscovered: **no reply counts, no "who replied" column in `/queue`, no reply-rate or response-time statistics, and no way to see an unanswered thread without opening Gmail.** The statistics goal is **deferred, not abandoned**. Trigger to revisit: the day a reply rate or a response time actually has to be reported, or the day the Gmail round-trip demonstrably costs more than the index would — which is a judgement to make after a batch has actually been sent, not before. |
 | **D22** | **Project = business, not campaign. Reverses D16.** `Mangood — Waitlist` (9 accounts) and `Mangood — Partners` (17) merge into one project, `Mangood` (26); `Mangood — Partners` is deleted once empty. | One row per business in the sidebar — click a business and you are in that identity; two rows for one business is the opposite of that. Each business has its own sending domain (2026-09-14 answer 1), and a sending identity belongs to a **business**, not a campaign: with two Mangood projects the same `fromEmail` has to be typed twice and drifts. `Account.kind` (D15) already carries the pipeline split, so collapsing the projects loses nothing — and it is the cheaper of the two options considered; the other was a Business tier above Project. Known rough edge: both projects' `approach` briefs are substantive and different (waitlist re-engagement vs. founder-to-founder partnership outreach), so they are **concatenated under per-pipeline headings** rather than one being discarded — `account-detail` renders `project.approach` read-only beside the composer and the operator needs whichever matches the contact's `kind`. One field now serves two pipelines; a per-kind brief is the obvious refinement if it grates. |
+| **D23** | **Per-business transport: a project with `sendVia = "resend"` sends from the CRM through the Resend API and polls replies back in.** Mangood is the first: `Ari <ari@mail.mangood.app>`, all Mangood mail (waitlist and partners). MichiKanji stays on Gmail drafts. Reverses the 2026-08-20 position that Resend may only sit *behind* Gmail as an SMTP relay. Partially supersedes D21 for Resend businesses: their conversation is an in-app timeline (`Interaction` rows, bodies included), not a Gmail link. | Asked for directly (2026-10-05) to send waitlist invitations programmatically and receive replies through Resend's API. The two objections from 2026-08-20 no longer hold. (1) *"The record splits"* — Resend Receiving is configured on `mail.mangood.app` (MX → `inbound-smtp.eu-west-1.amazonaws.com`, which also answers Q5) and lists received mail at `GET /emails/receiving`, so the CRM holds **both** directions for a Resend business; nothing for it is in Gmail to split from. (2) *"Resend has no drafts"* — the composer and the invite preview are the review step, and every send is confirmed. Polling, not a webhook, because the app answers only on localhost (`proxy.ts`). Bodies are stored because Resend keeps email data only 30 days. Received bodies must never reach `/api/compose` (D20). Batch invites are `POST /api/resend/send` with a list, one Resend call per recipient, idempotent per recipient + content for 24h. |
 
 ## 3. Phase 0 — mail infrastructure (owner, parallel, 48h timebox)
 
@@ -157,7 +158,7 @@ Archive Q1 (answer: fresh), Q3, Q4 (warm), Q7 are closed or void under D12/D13/D
 | Q2 | Which domain is the Workspace primary? Lock-in. | Task 0.a |
 | Q3 | Archive Q5 — why four domains rather than one? Four sender reputations divide an already-small n. | Nothing this week; revisit before domains 2–4 send. |
 | Q4 | Archive Q6 — do replies come from someone other than the person emailed? | Nothing now (D14 stands under D21; there is no index that cares). |
-| Q5 | Is **Resend inbound configured on `mangood.app`**? Moving MX to Google for the alias domain would break it if so. | Tasks 0.b/0.c — must be checked **before any DNS change**. |
+| Q5 | Is **Resend inbound configured on `mangood.app`**? Moving MX to Google for the alias domain would break it if so. | **Answered 2026-10-05:** on the subdomain `mail.mangood.app`, yes (MX → Resend's eu-west-1 inbound). The apex has no MX. D23 makes this the Mangood mailbox, so 0.b/0.c are moot for Mangood. |
 
 ---
 
@@ -182,7 +183,11 @@ trigger has fired; it is mitigated, not fixed.
 | E8 | `StatusEvent` only records changes made through the accounts PATCH route. Imports and Prisma Studio bypass it silently. `Interaction` inherits this. | Before writing any second import script. |
 | E9 | `/api/compose` sends contact names and notes to OpenRouter and onward to a third-party model. No disclosure, no opt-out, no record. | **Before `OPENROUTER_API_KEY` is ever set.** This is a disclosure gap, not a scale one — n does not make it better. |
 
-`Interaction` is migrated (`20260820134639_add_interaction_log`) and deliberately has no
-API and no UI: a timeline is worth more built against real replies than an empty table,
-and until an email is sent there is no conversation to lose. Build it after the first
-sends, not before.
+`Interaction` is migrated (`20260820134639_add_interaction_log`). **Updated 2026-10-05
+(D23):** it now has a read API (`GET /api/interactions`) and a timeline in `account-detail`,
+written only by the Resend routes — Resend businesses are the first with real sends and
+replies to show. Hand-written entries (calls, meetings, notes) still have no UI.
+
+**E5 for Mangood, 2026-10-05:** `fromEmail` is set again (`ari@mail.mangood.app`), but on a
+`resend` project, and `POST /api/gmail/draft` now refuses those with a 409 before building
+anything. The trigger cannot re-fire for Mangood through Gmail.
